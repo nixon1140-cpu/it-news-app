@@ -1,6 +1,7 @@
 "use client";
 
-import { ExternalLink, Sparkles } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ChevronDown, ExternalLink, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -10,9 +11,18 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useModeStore } from "@/lib/store/mode-store";
+import { AI_SERVICES, useHandoffStore, type AiServiceId } from "@/lib/store/handoff-store";
+import { cn } from "@/lib/utils";
 import type { Article } from "@/lib/types/article";
 
 interface ArticleDetailDialogProps {
@@ -45,6 +55,20 @@ export function ArticleDetailDialog({
   const mode = useModeStore((state) => state.mode);
   const isEnterprise = mode === "enterprise";
 
+  // ハイドレーション対策: article-card.tsx のブックマーク表示と同じパターン。
+  // SSR時点ではpersisted値を反映せず、マウント後にのみ実際のストア値を使う。
+  const [mounted, setMounted] = useState(false);
+  const handoffService = useHandoffStore((state) => state.service);
+  const setHandoffService = useHandoffStore((state) => state.setService);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const selectedServiceId: AiServiceId = mounted ? handoffService : "gemini";
+  const selectedService =
+    AI_SERVICES.find((service) => service.id === selectedServiceId) ?? AI_SERVICES[0];
+
   if (!article) return null;
 
   const action = isEnterprise ? article.action_enterprise : article.action_individual;
@@ -52,16 +76,16 @@ export function ArticleDetailDialog({
   const handleDeepAnalysisHandoff = async () => {
     const prompt = buildDeepAnalysisPrompt(article);
 
-    window.open("https://gemini.google.com/app", "_blank");
+    window.open(selectedService.url, "_blank");
 
     try {
       await navigator.clipboard.writeText(prompt);
       toast.success("プロンプトをコピーしました", {
-        description: "開いたGeminiの画面でペースト（Ctrl+V）してください。",
+        description: `開いた${selectedService.label}の画面でペースト（Ctrl+V）してください。`,
       });
     } catch (err) {
       toast.error("プロンプトのコピーに失敗しました", {
-        description: `Geminiのタブは開きました。お手数ですが手動でコピーしてください。(${(err as Error).message})`,
+        description: `${selectedService.label}のタブは開きました。お手数ですが手動でコピーしてください。(${(err as Error).message})`,
       });
     }
   };
@@ -128,12 +152,34 @@ export function ArticleDetailDialog({
 
           <TabsContent value="deep" className="space-y-3 pt-3">
             <p className="text-sm leading-relaxed text-muted-foreground">
-              この記事の深掘り分析用プロンプトをクリップボードにコピーし、Geminiの公式Web画面を新しいタブで開きます。開いた画面に貼り付けて（Ctrl+V）実行してください。
+              この記事の深掘り分析用プロンプトをクリップボードにコピーし、{selectedService.label}
+              の公式Web画面を新しいタブで開きます。開いた画面に貼り付けて（Ctrl+V）実行してください。
             </p>
-            <Button onClick={handleDeepAnalysisHandoff}>
-              <Sparkles className="size-4" />
-              ✨ Gemini(Web)で深掘り分析
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+                >
+                  {selectedService.label}
+                  <ChevronDown className="size-3.5" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuRadioGroup
+                    value={selectedServiceId}
+                    onValueChange={(value) => setHandoffService(value as AiServiceId)}
+                  >
+                    {AI_SERVICES.map((service) => (
+                      <DropdownMenuRadioItem key={service.id} value={service.id}>
+                        {service.label}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button onClick={handleDeepAnalysisHandoff}>
+                <Sparkles className="size-4" />✨ {selectedService.label}(Web)で深掘り分析
+              </Button>
+            </div>
           </TabsContent>
         </Tabs>
       </DialogContent>
