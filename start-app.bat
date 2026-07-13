@@ -89,7 +89,11 @@ rem 3. Start the Next.js production server in the background (minimized), not "n
 start /min cmd /c "npm run start"
 
 rem 4. Wait 5 seconds for the server to come up.
-timeout /t 5 /nobreak >nul
+rem "timeout" reads from console input and fails ("Input redirection is not
+rem supported") when stdin is redirected/non-interactive (Task Scheduler,
+rem or any non-console launch); that failure corrupts this script's own
+rem later goto/label resolution. Use ping as a stdin-free ~5 second delay.
+ping -n 6 127.0.0.1 >nul
 
 rem 5. Open the app in the default browser.
 start http://localhost:3001
