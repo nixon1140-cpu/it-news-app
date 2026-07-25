@@ -33,13 +33,20 @@ export function NavLinks({
             href={href}
             onClick={onNavigate}
             className={cn(
-              "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
-              isActive ? "bg-accent text-primary" : "text-muted-foreground",
+              "group relative flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
+              isActive ? "text-primary" : "text-muted-foreground",
               itemClassName
             )}
           >
             <Icon className="size-4" />
             {label}
+            <span
+              aria-hidden
+              className={cn(
+                "absolute inset-x-3 -bottom-px h-px scale-x-0 bg-primary transition-transform duration-300 ease-out group-hover:scale-x-100",
+                isActive && "scale-x-100"
+              )}
+            />
           </Link>
         );
       })}

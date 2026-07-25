@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bookmark, Building2, ExternalLink, User } from "lucide-react";
+import { ArrowUpRight, Bookmark, Building2, User } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -58,16 +58,18 @@ export function ArticleCard({ article, onClick }: ArticleCardProps) {
     <Card
       onClick={() => onClick?.(article)}
       className={cn(
-        "flex h-full flex-col cursor-pointer transition-colors hover:ring-primary/50",
+        "group flex h-full flex-col cursor-pointer transition-all duration-200 ease-out hover:-translate-y-0.5 hover:ring-primary/50 hover:shadow-lg",
         article.priority_label === "High" && "ring-primary/40"
       )}
     >
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
           <Badge className={priority.className}>{priority.text}</Badge>
-          <span className="text-xs text-muted-foreground">{article.category}</span>
+          <span className="eyebrow">{article.category}</span>
         </div>
-        <CardTitle className="line-clamp-2 pr-6">{article.title}</CardTitle>
+        <CardTitle className="font-heading line-clamp-2 pr-6 text-base font-semibold">
+          {article.title}
+        </CardTitle>
         <CardAction>
           <Button
             variant="ghost"
@@ -80,16 +82,16 @@ export function ArticleCard({ article, onClick }: ArticleCardProps) {
           >
             <Bookmark
               className={cn(
-                "size-4",
+                "size-4 transition-transform group-hover:scale-110",
                 showBookmarked ? "fill-primary text-primary" : "text-muted-foreground"
               )}
             />
           </Button>
         </CardAction>
       </CardHeader>
-      <CardContent className="flex flex-1 flex-col gap-2">
+      <CardContent className="flex flex-1 flex-col gap-3">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-xs text-muted-foreground">
+          <p className="eyebrow">
             {new Date(article.published_at).toLocaleDateString("ja-JP")}
           </p>
           <a
@@ -97,13 +99,13 @@ export function ArticleCard({ article, onClick }: ArticleCardProps) {
             target="_blank"
             rel="noopener noreferrer"
             onClick={(event) => event.stopPropagation()}
-            className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-primary"
+            className="flex items-center gap-0.5 text-xs text-muted-foreground transition-colors hover:text-primary"
           >
             元記事を読む
-            <ExternalLink className="size-3" />
+            <ArrowUpRight className="size-3 transition-transform duration-200 group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
           </a>
         </div>
-        <div className="mt-auto flex items-start gap-2 rounded-md bg-accent p-2">
+        <div className="mt-auto flex items-start gap-2 rounded-md bg-accent p-3">
           {isEnterprise ? (
             <Building2 className="mt-0.5 size-3.5 shrink-0 text-primary" />
           ) : (

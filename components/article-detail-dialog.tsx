@@ -96,21 +96,21 @@ export function ArticleDetailDialog({
         <DialogHeader>
           <div className="flex items-center gap-2">
             <Badge variant="outline">{article.category}</Badge>
-            <span className="text-xs text-muted-foreground">
+            <span className="eyebrow">
               {new Date(article.published_at).toLocaleDateString("ja-JP")}
             </span>
           </div>
-          <DialogTitle className="text-lg leading-snug">
+          <DialogTitle className="font-heading text-xl leading-snug font-semibold text-balance">
             {article.title}
           </DialogTitle>
           <a
             href={article.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-primary"
+            className="group flex items-center gap-0.5 text-xs text-muted-foreground transition-colors hover:text-primary"
           >
             元記事を読む
-            <ExternalLink className="size-3" />
+            <ExternalLink className="size-3 transition-transform duration-200 group-hover:translate-x-0.5" />
           </a>
         </DialogHeader>
 
@@ -141,7 +141,7 @@ export function ArticleDetailDialog({
 
           <TabsContent value="action" className="pt-3">
             <div className="space-y-2 rounded-md bg-accent p-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-accent-foreground/80">
+              <h3 className="eyebrow text-accent-foreground/80">
                 {isEnterprise ? "ビジネス視点向け" : "エンジニア視点向け"}
               </h3>
               <p className="text-sm leading-relaxed text-accent-foreground">
@@ -150,12 +150,12 @@ export function ArticleDetailDialog({
             </div>
           </TabsContent>
 
-          <TabsContent value="deep" className="space-y-3 pt-3">
+          <TabsContent value="deep" className="space-y-4 pt-3">
             <p className="text-sm leading-relaxed text-muted-foreground">
               この記事の深掘り分析用プロンプトをクリップボードにコピーし、{selectedService.label}
               の公式Web画面を新しいタブで開きます。開いた画面に貼り付けて（Ctrl+V）実行してください。
             </p>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2.5">
               <DropdownMenu>
                 <DropdownMenuTrigger
                   className={cn(buttonVariants({ variant: "outline", size: "sm" }))}

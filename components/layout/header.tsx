@@ -21,11 +21,13 @@ export function Header() {
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/80">
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4">
-        <div className="flex items-center gap-6">
-          <Link href="/" className="flex items-center gap-2 text-lg font-semibold tracking-tight">
+      <div className="mx-auto flex h-18 max-w-7xl items-center justify-between gap-4 px-4">
+        <div className="flex items-center gap-8">
+          <Link href="/" className="flex items-center gap-2.5">
             <Newspaper className="size-6 text-primary" />
-            <span className="hidden sm:inline">IT News Navigator</span>
+            <span className="hidden font-heading text-xl leading-none font-semibold tracking-tight sm:inline">
+              IT News Navigator
+            </span>
           </Link>
           <NavLinks className="hidden md:flex" />
         </div>

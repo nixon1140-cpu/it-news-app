@@ -42,10 +42,10 @@ function FilterChip({
     <Badge
       onClick={onClick}
       className={cn(
-        "cursor-pointer select-none border-transparent px-3 py-1 text-xs transition-colors",
+        "cursor-pointer select-none rounded-full border px-3.5 py-1.5 text-xs font-medium transition-all",
         active
-          ? "bg-primary text-primary-foreground"
-          : "bg-muted text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+          ? "border-primary bg-primary text-primary-foreground ring-2 ring-primary/15"
+          : "border-border bg-transparent text-muted-foreground hover:border-primary/50 hover:text-foreground"
       )}
     >
       {children}
@@ -107,9 +107,9 @@ export function ArticleDashboard({
 
   return (
     <>
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3.5">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted-foreground">優先度:</span>
+          <span className="eyebrow">優先度</span>
           {PRIORITY_FILTERS.map((filter) => (
             <FilterChip
               key={filter.value}
@@ -121,7 +121,7 @@ export function ArticleDashboard({
           ))}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted-foreground">カテゴリ:</span>
+          <span className="eyebrow">カテゴリ</span>
           <FilterChip active={categoryFilter === "All"} onClick={() => setCategoryFilter("All")}>
             すべて
           </FilterChip>
@@ -142,20 +142,27 @@ export function ArticleDashboard({
           条件に一致する記事がありません。
         </p>
       ) : (
-        <div className="mt-4 flex flex-col gap-6">
+        <div className="mt-2 flex flex-col gap-8">
           {sections.map((section) => (
-            <div key={section.value} className="flex flex-col gap-3">
+            <div key={section.value} className="flex flex-col gap-3.5">
               {section.label && (
-                <h2 className="text-sm font-semibold text-muted-foreground">
-                  {section.label}
-                  <span className="ml-2 text-xs font-normal">
-                    ({section.articles.length}件)
-                  </span>
-                </h2>
+                <div className="flex items-center gap-3">
+                  <h2 className="font-heading text-lg font-semibold tracking-tight text-foreground">
+                    {section.label}
+                  </h2>
+                  <span className="eyebrow">{section.articles.length}件</span>
+                  <span aria-hidden className="h-px flex-1 bg-border" />
+                </div>
               )}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {section.articles.map((article) => (
-                  <ArticleCard key={article.id} article={article} onClick={handleCardClick} />
+                {section.articles.map((article, index) => (
+                  <div
+                    key={article.id}
+                    className="fade-up-in"
+                    style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}
+                  >
+                    <ArticleCard article={article} onClick={handleCardClick} />
+                  </div>
                 ))}
               </div>
             </div>

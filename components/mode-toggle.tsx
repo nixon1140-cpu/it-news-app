@@ -21,7 +21,7 @@ export function ModeToggle({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2",
+        "flex items-center gap-2.5 rounded-full border border-border bg-card px-3.5 py-2 transition-colors",
         className
       )}
     >

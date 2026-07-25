@@ -34,10 +34,13 @@ export default function TrendsPage() {
   }, []);
 
   return (
-    <div className="flex flex-1 flex-col gap-4 p-4 md:p-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">トレンド分析</h1>
-        <p className="text-sm text-muted-foreground">
+    <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
+      <div className="flex flex-col gap-1.5">
+        <p className="eyebrow">AIによるマクロ分析</p>
+        <h1 className="font-heading text-3xl font-semibold tracking-tight text-balance md:text-4xl">
+          トレンド分析
+        </h1>
+        <p className="max-w-2xl text-sm text-muted-foreground">
           直近のニュースからAIが抽出した、IT業界のマクロなトレンドです。
           {cached && "（キャッシュ済みのデータを表示しています。最大12時間ごとに更新されます）"}
         </p>
@@ -60,7 +63,13 @@ export default function TrendsPage() {
       {!error && trends !== null && trends.length > 0 && (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
           {trends.map((trend, index) => (
-            <TrendCard key={index} trend={trend} index={index} />
+            <div
+              key={index}
+              className="fade-up-in"
+              style={{ animationDelay: `${index * 60}ms` }}
+            >
+              <TrendCard trend={trend} index={index} />
+            </div>
           ))}
         </div>
       )}
