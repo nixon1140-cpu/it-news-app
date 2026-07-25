@@ -21,9 +21,21 @@ async function ArticlesSection() {
 }
 
 export default function Home() {
+  const dateline = new Date().toLocaleDateString("ja-JP", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    weekday: "short",
+  });
+
   return (
-    <div className="flex flex-1 flex-col gap-4 p-4 md:p-6">
-      <h1 className="text-2xl font-semibold tracking-tight">ダッシュボード</h1>
+    <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
+      <div className="flex flex-col gap-1.5">
+        <p className="eyebrow">本日のブリーフィング · {dateline}</p>
+        <h1 className="font-heading text-3xl font-semibold tracking-tight text-balance md:text-4xl">
+          ダッシュボード
+        </h1>
+      </div>
       <Suspense fallback={<ArticleGridSkeleton />}>
         <ArticlesSection />
       </Suspense>
