@@ -9,6 +9,8 @@
 // gemma4:e4b-it-q4_K_M / gemma4:e2b-it-q4_K_M を比較した結果、いずれも正常な日本語を生成し、
 // 特に gemma4:e4b-it-q4_K_M は llama3.1:8b と同等サイズながら安定した品質と高速性（約1/5の時間）を
 // 両立したため、これを採用した。
+import { execFile } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import dotenv from "dotenv";
 import Parser from "rss-parser";
@@ -32,6 +34,124 @@ async function ensureOllamaIsRunning(): Promise<void> {
       "Ollamaに接続できません（http://127.0.0.1:11434）。Ollamaが起動していない可能性があります。" +
         "タスクスケジューラの自動起動設定、または手動で `ollama serve` を実行してから再度お試しください。"
     );
+  }
+}
+
+// --- Python サブプロセス連携（本文抽出・重複判定） -------------------------
+// python/ディレクトリのvenvが未セットアップ（初回クローン直後等）の場合や、
+// 実行時エラーの場合は、既存のRSSベースの抽出・重複無視の挙動へ自動的に
+// フォールバックする（クロール全体を失敗させないため）。
+const PYTHON_DIR = path.resolve(__dirname, "../../python");
+const PYTHON_EXECUTABLE = path.join(
+  PYTHON_DIR,
+  "venv",
+  process.platform === "win32" ? "Scripts/python.exe" : "bin/python3"
+);
+const EXTRACT_SCRIPT = path.join(PYTHON_DIR, "extract_article.py");
+const DEDUPE_SCRIPT = path.join(PYTHON_DIR, "dedupe_articles.py");
+const PYTHON_SUBPROCESS_TIMEOUT_MS = 15000;
+const ARTICLE_FETCH_TIMEOUT_MS = 10000;
+const DEDUPE_SIMILARITY_THRESHOLD = 90;
+
+const isPythonAvailable = fs.existsSync(PYTHON_EXECUTABLE);
+if (!isPythonAvailable) {
+  console.warn(
+    `  警告: Python実行環境が見つかりません（${PYTHON_EXECUTABLE}）。` +
+      "本文抽出・重複判定はスキップし、既存のRSSベースの動作にフォールバックします。"
+  );
+}
+
+// stdin経由でテキストを渡してPythonスクリプトを実行する。
+// child_process.execFile はコールバック版のみ stdin への書き込みに対応するため、
+// Promise化はここで手動で行う。
+function runPythonScript(scriptPath: string, args: string[], stdinInput: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      PYTHON_EXECUTABLE,
+      [scriptPath, ...args],
+      { timeout: PYTHON_SUBPROCESS_TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024, encoding: "utf-8" },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(`${error.message}${stderr ? ` (stderr: ${stderr.trim()})` : ""}`));
+          return;
+        }
+        resolve(stdout);
+      }
+    );
+    child.stdin?.end(stdinInput, "utf-8");
+  });
+}
+
+// 記事の全文ページを取得し、trafilatura（Pythonサブプロセス）で本文抽出する。
+// 取得・抽出のいずれかに失敗した場合はnullを返し、呼び出し側は既存のRSS
+// スニペットをそのまま使う（フォールバック）。
+async function tryExtractFullArticleText(url: string): Promise<string | null> {
+  if (!isPythonAvailable) return null;
+
+  let html: string;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), ARTICLE_FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) return null;
+      html = await res.text();
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  } catch {
+    return null;
+  }
+
+  try {
+    const stdout = await runPythonScript(EXTRACT_SCRIPT, ["--url", url], html);
+    const parsed = JSON.parse(stdout) as { title: string | null; text: string | null; date: string | null };
+    return parsed.text?.trim() || null;
+  } catch (error) {
+    console.warn(`  本文抽出(Python)に失敗したためRSSスニペットを使用します (${url}): ${(error as Error).message}`);
+    return null;
+  }
+}
+
+// 記事一覧に対し、可能な範囲でtrafilaturaによる本文抽出でexcerptを上書きする
+// （抽出できなかった記事は既存のRSSスニペットのままにする）。
+async function enrichExcerptsWithFullText(items: FeedItem[]): Promise<void> {
+  if (!isPythonAvailable) return;
+
+  for (const item of items) {
+    const fullText = await tryExtractFullArticleText(item.url);
+    if (fullText) {
+      item.excerpt = fullText.slice(0, MAX_EXCERPT_LENGTH);
+    }
+  }
+}
+
+// rapidfuzz（Pythonサブプロセス）でタイトルのあいまい一致による重複候補を
+// 判定し、各重複グループの先頭以外を除外した新しい配列を返す。
+// 判定に失敗した場合は空配列扱いとし、全件をそのまま返す（フォールバック）。
+async function removeDuplicateArticles(items: FeedItem[]): Promise<FeedItem[]> {
+  if (!isPythonAvailable || items.length === 0) return items;
+
+  try {
+    const payload = JSON.stringify(items.map((item) => ({ title: item.title, url: item.url })));
+    const stdout = await runPythonScript(
+      DEDUPE_SCRIPT,
+      ["--threshold", String(DEDUPE_SIMILARITY_THRESHOLD)],
+      payload
+    );
+    const parsed = JSON.parse(stdout) as { duplicate_groups: number[][] };
+    const duplicateGroups = parsed.duplicate_groups ?? [];
+
+    if (duplicateGroups.length === 0) return items;
+
+    const dropIndices = new Set<number>();
+    for (const group of duplicateGroups) {
+      for (const idx of group.slice(1)) dropIndices.add(idx);
+    }
+    return items.filter((_, idx) => !dropIndices.has(idx));
+  } catch (error) {
+    console.warn(`  重複判定(Python)に失敗したためスキップします: ${(error as Error).message}`);
+    return items;
   }
 }
 
@@ -320,8 +440,17 @@ async function main() {
   await ensureOllamaIsRunning();
 
   console.log(`RSS取得中: ${RSS_FEEDS.map((f) => f.name).join(", ")}`);
-  const items = await fetchLatestArticles();
-  console.log(`${items.length}件の記事を取得しました。`);
+  const rawItems = await fetchLatestArticles();
+  console.log(`${rawItems.length}件の記事を取得しました。`);
+
+  console.log("本文抽出中(Python/trafilatura)...");
+  await enrichExcerptsWithFullText(rawItems);
+
+  console.log("重複記事を判定中(Python/rapidfuzz)...");
+  const items = await removeDuplicateArticles(rawItems);
+  if (items.length < rawItems.length) {
+    console.log(`重複記事を${rawItems.length - items.length}件除外しました（${items.length}件を処理します）。`);
+  }
 
   for (const [index, item] of items.entries()) {
     console.log(`[${index + 1}/${items.length}] 推論中(Ollama/${OLLAMA_MODEL}): ${item.title}`);
