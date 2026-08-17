@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bookmark, LayoutDashboard, TrendingUp } from "lucide-react";
+import { Archive, Bookmark, LayoutDashboard, TrendingUp } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -10,6 +10,7 @@ const NAV_ITEMS = [
   { href: "/", label: "ダッシュボード", icon: LayoutDashboard },
   { href: "/bookmarks", label: "ブックマーク", icon: Bookmark },
   { href: "/trends", label: "トレンド分析", icon: TrendingUp },
+  { href: "/archive", label: "過去のニュース", icon: Archive },
 ];
 
 export function NavLinks({

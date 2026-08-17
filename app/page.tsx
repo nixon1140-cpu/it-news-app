@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { ArticleDashboard } from "@/components/article-dashboard";
 import { ArticleGridSkeleton } from "@/components/article-grid-skeleton";
 import { getArticles } from "@/lib/api/articles";
+import { splitArticlesByRecency } from "@/lib/utils/article-recency";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,16 @@ async function ArticlesSection() {
     );
   }
 
-  return <ArticleDashboard articles={articles} />;
+  // ダッシュボードは直近1週間の記事のみを表示し、それより前の記事は
+  // 「過去のニュース」（/archive）に分離する。
+  const { recent } = splitArticlesByRecency(articles);
+
+  return (
+    <ArticleDashboard
+      articles={recent}
+      emptyMessage="直近1週間の記事はまだありません。過去のニュースは「過去のニュース」ページからご覧いただけます。"
+    />
+  );
 }
 
 export default function Home() {
