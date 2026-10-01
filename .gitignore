@@ -43,3 +43,9 @@ next-env.d.ts
 # python (crawler subprocess scripts)
 python/venv/
 python/__pycache__/
+
+# supabase credentials memo files (never commit)
+supabase/*.txt
+
+# backup files
+*.bak*
