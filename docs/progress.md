@@ -1,43 +1,41 @@
-# it-news-app 作業進捗（2026-10-04 時点）
+# it-news-app 作業進捗（2026-10-05 時点）
 
 新しいセッションで続きから再開するためのメモ。秘密の値（キー・パスワード）は書かない。
 
 ## 今の状況
-- 現在のブランチ: `chore/d1-test-setup`（`main` はまだ最新に進めていない・push もしていない）
-- `origin/main` は `64c41a1`。ローカルの `chore/d1-test-setup` はその先に2コミット
-  - `8e4c2db` `.gitignore` に `supabase/*.txt` と `*.bak*` を追加
-  - `f617c9c` Vitest + React Testing Library 導入、`extractJson` のテスト追加（`npm run test` は10件パス）
-- 本番（3001）・開発（3000）の起動状態は毎回確認が必要（バックグラウンドのプロセスはセッションをまたぐと止まりやすい）
+- 現在のブランチ: `feature/ollama-stability`（`main` へ未反映・未push）
+- `origin/main` には chore/d1-test-setup 分（Vitest導入、`.gitignore` 強化、`.claude/settings.local.json` の追跡解除）まで反映済み
+- `feature/ollama-stability` の未pushコミット（O-1〜O-4）:
+  - O-1 `8468586` Ollamaクライアントにタイムアウト（5分）・リトライ（最大3回、待機2秒→4秒）・keep_alive（30分）
+  - O-2 クローラー開始時に Ollama 起動待ち（最大120秒）→ モデル存在確認 → 試し生成（`lib/ollama/health.ts`）
+  - O-3 `/api/health`（アプリ・Ollama・モデルの状態を返す）
+  - O-4 `start-app.bat` にニュース集め前の Ollama 待機（最大120秒、ping方式、失敗しても起動は止めない）
+- Vitest は `npm run test` で22件パス、`npx tsc --noEmit` も問題なし
+- 3001（本番）は古いビルドのまま。`/api/health` を出すには `npm run build` → `npm run start` が必要。3000（開発）は確認用に起動していた
 
 ## 終わったこと
-- フェーズ1: Pythonで記事本文抽出（trafilatura）と重複検出（rapidfuzz）をクローラーに追加、本番反映・push済み
-- 「過去のニュース」ページ（`/archive`）追加、README とポートフォリオ反映、push済み
-- パスワードを書いたファイルが公開履歴に入っていた件: パスワードを変更し、`git filter-repo` で履歴から除去、force push 済み。ローカルの古いブランチ5本と古い履歴（reflog・gc 含む）も削除済み。作業用コピーとバックアップも削除済み
-- `.gitignore` 整備（`supabase/*.txt`、`*.bak*`）
-- D1 Step 1〜2: Vitest 導入と `extractJson` テスト（コミット済み・未push）
-- G0（フェーズG の変更提案20件・要判断12件）を作成済み。**未承認**
-- Ollama診断（Step 2）完了。**変更提案10件・要判断6件は未承認**
+- Supabase キーのローテーション（新方式 publishable/secret に交換、旧キー無効化、`.claude/settings.local.json` を追跡解除）。履歴からの除去は未実施（キーは無効化済みのため任意）
+- パスワードファイルを公開履歴から除去済み
+- Ollama 修理（0.35.1、トレイアプリのみで起動）。ニュース集め 15/15 件成功。内蔵GPUは遅くなったため元に戻した（CPUのみ、約2.5分/記事）
+- Ollama 安定化 O-1〜O-4（上記）
+- `/api/trends` も新モデル `gemma4:e4b-it-q4_K_M` を使用
 
-## 残っている課題（優先順）
-1. **【最優先・重大】`.claude/settings.local.json` に本番の `service_role` キー（全権限のキー）と `anon` キーが書かれたまま、公開リポジトリ（`origin/main`、初回コミット `86bc486`）に 2026-07-05 から載っている**
-   - 現在の `.env.local` と同じキー（有効期限は未来＝まだ使える）
-   - 他に password/token 系の行3つも `.env.local` の値と一致
-   - 未実施: キーのローテーション、追跡解除（`git rm --cached`）、`.gitignore` 追加、履歴からの除去、push
-   - `.claude/launch.json`・`.claude/scheduled_tasks.lock` は機密なし
-2. `chore/d1-test-setup` を `main` へ反映する作業は保留中（上の件が先。`git checkout` で追跡解除前のファイルが消えないよう注意）
-3. Ollama が動かない（本体 `ollama.exe` が6/17版のまま、`llama-server` が9/29版で食い違い、`--no-mmap` エラー）。トレイアプリとタスクの二重起動で約18,000件のエラーログ。直すには管理者権限での再インストールが必要
-4. `/api/trends` はモデル未指定のため古い `llama3.1:8b`（無限反復バグ報告あり）が使われる
-5. D1 の残り: Step 3 pytest導入、Step 4〜6 Pythonのテスト、Step 7 RLSテスト（`.env.test` にテスト用Supabaseの接続情報は設定済み）
-6. 脆弱性警告（`npm audit`）: Next.js 16.2.9 など。別途対応が必要
-7. `supabase/` に接続情報メモの `.txt` が過去にあった。現在は作業ツリーに0件、`.gitignore` で除外済み
+## 残っている課題
+1. `feature/ollama-stability` の push と `main` への反映（承認待ち）
+2. 実機で `start-app.bat` 全体とクローラーを通しで動かす確認は未実施
+3. `.claude/settings.local.json` は公開履歴に残っている（キーは無効。履歴除去は任意）
+4. `npm audit` の重大・高の脆弱性（Next.js 16.2.9 など）
+5. `extractJson` は null/undefined を渡すと TypeError（既知・未修正）
+6. G0 の要判断12件は未回答（回答後に G1〜G4）
+7. 環境変数 OLLAMA_MODELS のマシン側とユーザー側で値が違う（トレイ起動のみなら実害なし）
 
 ## 次にやること
-1. service_role キーのローテーション（Supabase側）→ `.env.local` 更新 → `.claude/settings.local.json` の追跡解除と履歴除去（再度 filter-repo）→ push
-2. 上記が終わったら `chore/d1-test-setup` を main に反映して push
-3. Ollama を直す（再インストール、起動の一本化）→ 提案10件の承認・実装
-4. D1 Step 3〜7（pytest、RLSテスト）→ G0 提案の承認 → G1〜G4（ソース拡張・話題度・手動投入・定期実行）
+1. `feature/ollama-stability` の push 承認 → main へ反映
+2. D1 Step 3〜7（pytest 導入、Python のテスト、RLS テスト）
+3. G0 の要判断に回答 → G1〜G4（ソース拡張・話題度・手動投入・定期実行）
+4. 必要なら 3001 を再ビルドして `/api/health` を確認
 
 ## 作業ルール（このプロジェクト）
-- コミット前にブランチ確認、`git add` はファイル名指定（`-A` は使わない）、push は承認後
-- 秘密の値は表示・保存しない。`<PW-FILE>`（パスワードを含むファイル名）は伏せ字
-- 同じエラーを2回直しても解決しなければ止めて報告
+- コミット前にブランチ確認、`git add` はファイル名指定（`-A` は使わない）、コミット後 `git show --stat` で README/.env の混入確認
+- push は承認後。秘密の値は表示・保存しない
+- 同じエラーを2回直しても解決しなければ止めて報告（Opus 5.5 の新セッション切替の意見も添える）
