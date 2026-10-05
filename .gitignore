@@ -49,3 +49,6 @@ supabase/*.txt
 
 # backup files
 *.bak*
+
+# Claude Code local settings (may contain keys; never commit)
+.claude/settings.local.json
