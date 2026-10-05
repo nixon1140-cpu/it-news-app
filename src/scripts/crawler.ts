@@ -17,24 +17,15 @@ import Parser from "rss-parser";
 import { createClient } from "@supabase/supabase-js";
 
 import { extractJson, generateJson } from "../../lib/ollama/client";
+import { waitForOllamaReady } from "../../lib/ollama/health";
 import type { Article, PriorityLabel } from "../../lib/types/article";
 
 dotenv.config({ path: path.resolve(__dirname, "../../.env.local") });
 
-const OLLAMA_VERSION_ENDPOINT = "http://127.0.0.1:11434/api/version";
-
 // Ollamaが起動していない状態で全記事の推論を試みて延々と失敗するのを防ぐため、
-// 実行開始時に一度だけ疎通確認する。
+// 実行開始時に起動待ち（最大120秒）・モデル存在確認・試し生成を行う。
 async function ensureOllamaIsRunning(): Promise<void> {
-  try {
-    const res = await fetch(OLLAMA_VERSION_ENDPOINT);
-    if (!res.ok) throw new Error(`status ${res.status}`);
-  } catch {
-    throw new Error(
-      "Ollamaに接続できません（http://127.0.0.1:11434）。Ollamaが起動していない可能性があります。" +
-        "タスクスケジューラの自動起動設定、または手動で `ollama serve` を実行してから再度お試しください。"
-    );
-  }
+  await waitForOllamaReady(OLLAMA_MODEL);
 }
 
 // --- Python サブプロセス連携（本文抽出・重複判定） -------------------------

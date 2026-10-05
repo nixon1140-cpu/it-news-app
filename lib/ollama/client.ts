@@ -40,7 +40,7 @@ export class OllamaHttpError extends Error {
 }
 
 // 構造化ログ（JSON1行）。キーや本文は出さず、種別と状況だけを記録する。
-function logEvent(level: "INFO" | "WARNING" | "ERROR", message: string, extra: Record<string, unknown> = {}) {
+export function logEvent(level: "INFO" | "WARNING" | "ERROR", message: string, extra: Record<string, unknown> = {}) {
   const line = JSON.stringify({
     timestamp: new Date().toISOString(),
     level,
