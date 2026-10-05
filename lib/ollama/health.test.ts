@@ -71,3 +71,19 @@ describe("waitForOllamaReady", () => {
     ).rejects.toBeInstanceOf(OllamaHttpError);
   });
 });
+
+describe("checkOllama", () => {
+  it("状態を ok / model_missing / unreachable で返す", async () => {
+    const { checkOllama } = await import("./health");
+    expect(await checkOllama(MODEL, makeFetch(() => tagsResponse([MODEL])))).toBe("ok");
+    expect(await checkOllama(MODEL, makeFetch(() => tagsResponse(["x"])))).toBe("model_missing");
+    expect(
+      await checkOllama(
+        MODEL,
+        makeFetch(() => {
+          throw new TypeError("fetch failed");
+        })
+      )
+    ).toBe("unreachable");
+  });
+});

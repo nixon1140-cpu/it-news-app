@@ -91,3 +91,15 @@ export async function waitForOllamaReady(
   await generateJson("Reply with {}", probeOptions);
   logEvent("INFO", "Ollamaの準備を確認しました", { model });
 }
+
+export type OllamaStatus = "ok" | "unreachable" | "model_missing";
+
+// /api/health 用の1回だけの確認（待機も試し生成もしない軽い確認）。
+export async function checkOllama(
+  model: string,
+  fetchImpl: typeof fetch = fetch
+): Promise<OllamaStatus> {
+  const installed = await fetchInstalledModels(fetchImpl);
+  if (!installed) return "unreachable";
+  return installed.includes(model) ? "ok" : "model_missing";
+}

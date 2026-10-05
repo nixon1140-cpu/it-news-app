@@ -2,7 +2,7 @@
 // Node.js環境でのIPv6（::1）解決エラーを避けるため、127.0.0.1を明示する。
 const OLLAMA_ENDPOINT = "http://127.0.0.1:11434/api/generate";
 // クローラーと同じモデル。以前の既定値(llama3.1:8b)は無限反復バグが報告されているため変更した。
-const DEFAULT_OLLAMA_MODEL = "gemma4:e4b-it-q4_K_M";
+export const DEFAULT_OLLAMA_MODEL = "gemma4:e4b-it-q4_K_M";
 // 出力途中での切断（Unterminated string等のJSONパースエラー）を防ぐための
 // 十分な最大出力トークン数。
 const DEFAULT_NUM_PREDICT = 2048;
