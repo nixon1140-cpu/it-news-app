@@ -66,6 +66,27 @@ goto skip_crawler
 
 :run_crawler
 echo Collecting IT News...
+rem 0. Wait for Ollama (up to 120 s, 5 s steps) so the crawler does not start before it is up.
+rem ping is used as a stdin-free delay (see notes below). Never blocks more than 120 s;
+rem if Ollama stays down the crawler itself reports the error and the app still starts.
+set "OLLAMA_WAIT_ATTEMPTS=0"
+
+:ollama_wait_loop
+curl -s -m 3 -o nul http://127.0.0.1:11434/api/version >nul 2>&1
+if "!ERRORLEVEL!"=="0" goto ollama_ready
+set /a OLLAMA_WAIT_ATTEMPTS+=1
+if !OLLAMA_WAIT_ATTEMPTS! GEQ 24 goto ollama_wait_timeout
+ping -n 6 127.0.0.1 >nul
+goto ollama_wait_loop
+
+:ollama_wait_timeout
+call :log "WARNING: Ollama did not respond within 120 seconds. Continuing; the crawler will report the failure."
+goto ollama_wait_done
+
+:ollama_ready
+call :log "Ollama is ready (waited !OLLAMA_WAIT_ATTEMPTS! checks)."
+
+:ollama_wait_done
 rem 1. Run the crawler to fetch the latest news (wait for completion).
 call npm run crawl
 call :log "Crawler executed."
