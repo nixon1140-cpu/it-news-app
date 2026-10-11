@@ -27,6 +27,7 @@
 4. `extractJson` は null/undefined を渡すと TypeError（既知・未修正）
 5. G0 の要判断12件は未回答（回答後に G1〜G4）
 6. 環境変数 OLLAMA_MODELS のマシン側とユーザー側で値が違う（トレイ起動のみなら実害なし）
+7. Ollama API エラーは、PC再起動後は発生していない。6番（OLLAMA_MODELS のずれ）と関係している可能性があるので、再発したら6番から確認する
 
 ## 次にやること
 1. D1 Step 3〜7（pytest 導入、Python のテスト、RLS テスト）
