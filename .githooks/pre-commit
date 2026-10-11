@@ -1,0 +1,10 @@
+#!/bin/sh
+# .envファイル(秘密情報の可能性)が誤ってコミットされるのを防ぐ
+blocked=$(git diff --cached --name-only --diff-filter=ACM | grep -E '(^|/)\.env(\..*)?$' | grep -v '\.env\.example$')
+if [ -n "$blocked" ]; then
+  echo "pre-commit: 以下の.envファイルがコミットに含まれています(中止)"
+  echo "$blocked"
+  echo "git restore --staged <file> で外してください。"
+  exit 1
+fi
+exit 0
