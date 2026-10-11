@@ -52,3 +52,6 @@ supabase/*.txt
 
 # Claude Code local settings (may contain keys; never commit)
 .claude/settings.local.json
+
+# Portfolio screenshots (kept in the portfolio repo, not here)
+docs/screenshots/
