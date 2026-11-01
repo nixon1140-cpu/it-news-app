@@ -6,7 +6,7 @@ rem The crawler itself waits for Ollama (up to 120 s), records the run in the cr
 rem and skips if another crawl is already running. Output is appended to crawl-task.log.
 rem NOTE: do not use "timeout" here (it fails when stdin is not a console); the crawler needs no delay.
 
-cd /d C:\Users\okina\it-news-app
+cd /d "%~dp0.."
 
 set "STATE_DIR=%LOCALAPPDATA%\it-news-app"
 set "TASK_LOG=%STATE_DIR%\crawl-task.log"
