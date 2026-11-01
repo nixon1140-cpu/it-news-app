@@ -90,3 +90,14 @@ G1〜G4 は progress.md の「G0 の要判断12件」への回答後に着手す
 * **G4 定期実行:** GitHub Actions はローカルの Ollama に届かないため、Windows タスクスケジューラ または `start-app.bat` の延長で行う。
 * **G5 週次まとめ:** 話題度上位5本（G2 前は `priority_label` 上位で代替）を「事実」（`summary`）と「示唆」（`action_individual` / `action_enterprise`）に分けて構成し、LLM は総括のみ生成。保存先 `weekly_digests`（`week_start`, `content` JSON, `created_at`）、RLS は読み取りのみ公開。出力 JSON は `extractJson` で取り出す。
 * 参考: MameTech News（technews.mametaro.dev）。Grok Bot・Cursor SDK は課金が発生するため採用しない。
+
+## 6. エージェント構成の検討
+* **結論:** サブエージェント、AIチーム／マルチエージェントは使わない（2026-11時点）。
+* **理由:**
+  * RSS収集はコードで行い、AIの役にしない。
+  * 要約と提案を分けると、記事ごとにローカルLLMの呼び出しが2倍になり、処理時間が延びる。
+  * 深掘り分析は外部AIへのコピー&ペーストに任せる設計のため、アプリ内の多段化は不要。
+* **見直す条件**（どれかに当てはまったら「要約役→提案役」の2段階への分割を検討）:
+  * 提案の質がばらつく、または要約の言い換えにすぎない提案が多い。
+  * LLM出力のJSON形式崩れが多い。
+  * 提案だけを別の基準で評価・改善したくなった。
