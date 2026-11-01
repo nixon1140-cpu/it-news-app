@@ -3,13 +3,14 @@
 新しいセッションで続きから再開するためのメモ。秘密の値（キー・パスワード）は書かない。
 
 ## 今の状況
-- 現在のブランチ: `main`（D1 のコミットは push 済み）。`feature/ollama-stability` は push済みで main に反映済み
+- 現在のブランチ: `feature/g4-scheduled-crawl`（G4 の実装6コミット。**未push・未マージ**）。`main` は D1 まで push 済み
+- **G4（定期実行）は実装済みだが、本番DBへの `crawl_runs` 作成が済むまで有効にしない**。順序は下の「G4 を有効にする手順」。それまで `start-app.bat` の収集判定は「確認失敗 → 安全側でスキップ」になり、収集は走らない（手動の `npm run crawl` も `crawl_runs` が無いと中止する）
 - main に入っている Ollama 安定化（O-1〜O-4）:
   - O-1 Ollamaクライアントにタイムアウト（5分）・リトライ（最大3回、待機2秒→4秒）・keep_alive（30分）
   - O-2 クローラー開始時に Ollama 起動待ち（最大120秒）→ モデル存在確認 → 試し生成（`lib/ollama/health.ts`）
   - O-3 `/api/health`（アプリ・Ollama・モデルの状態を返す）
   - O-4 `start-app.bat` にニュース集め前の Ollama 待機（最大120秒、ping方式、失敗しても起動は止めない）
-- `npm test` は5ファイル31件パス（lib=node / components=jsdom の2プロジェクト、外部接続なし）。`python/venv/Scripts/python.exe -m pytest python/tests` は14件パス。`npx tsc --noEmit` も問題なし
+- `npm test` は10ファイル75件パス（lib=node / components=jsdom の2プロジェクト、外部接続なし）。`python/venv/Scripts/python.exe -m pytest python/tests` は14件パス。`npx tsc --noEmit` も問題なし
 - RLS テスト（`npm run test:rls`）は実装済み。`.env.test` に3値（URL / anon / `TEST_SUPABASE_SERVICE_ROLE_KEY`）が揃っているときだけ実行、本番URLと同じなら即停止。テスト用DBに schema.sql（GRANT 込み）を適用済みで、6件パス。実行後に `test-` 行は残らない
 - 3001（本番）は古いビルドのまま。`/api/health` を出すには `npm run build` → `npm run start` が必要
 - architect-ai 側の進捗メモも更新・push済み（`3fdc412`）
@@ -21,6 +22,7 @@
 - Ollama 安定化 O-1〜O-4（上記）
 - `/api/trends` も新モデル `gemma4:e4b-it-q4_K_M` を使用
 - D1: Vitest 環境分離 / extractJson テスト追加 / pytest 導入（`python/tests`、保存済みHTML）/ `schema.sql` に url UNIQUE を統合（再実行可）/ RLS テスト / spec 更新
+- G4（実装のみ。未適用）: `schema.sql` に `crawl_runs`（部分一意索引で二重実行を防止、RLS 有効・ポリシーなし、service_role のみ）/ `lib/crawl/`（記録・時間上限つきループ・スキップ判定・伏せ字・ローカルログ・Supabase 版ストア）/ crawler が開始・終了を記録（全体の時間上限1時間50分、Ollama 呼び出しごとに残り時間を再計算、残り30秒未満は未処理として打ち切り）/ `npm run crawl:check`（終了コード 0=実行・10=スキップ）/ `start-app.bat` を起動時刻マーカーから crawl:check に置き換え / `scripts/run-crawl.bat` と `scripts/register-crawl-task.ps1`（登録は手動）
 
 ## 残っている課題
 1. 実機で `start-app.bat` 全体とクローラーを通しで動かす確認は未実施
@@ -30,13 +32,28 @@
 5. G0 の要判断12件は回答済み（docs/spec.md 5.1 参照）。G1〜G5 は未着手（5.2 に未決定の案が残る）
 6. 環境変数 OLLAMA_MODELS のマシン側とユーザー側で値が違う（トレイ起動のみなら実害なし）
 7. Ollama API エラーは、PC再起動後は発生していない。6番（OLLAMA_MODELS のずれ）と関係している可能性があるので、再発したら6番から確認する
-8. `schema.sql` の GRANT は本番DBには未適用（本番の権限は従来のまま）。本番に適用するかは別途判断
+8. `schema.sql`（articles の GRANT と `crawl_runs`）は本番DBには未適用。G4 を有効にするため、下の手順で本番に流す（本番は it-news-app 専用・anon の書き込みは無いので、articles の権限変更によるアプリへの影響は無い見込み）
 9. 重複判定の「失敗時に除外しない」動作は crawler.ts 側にあり、テスト未整備（pytest は終了コード1・標準出力なしまで確認）
 10. `supabase/migrations/002` は schema.sql に統合済み。既存DB向けの履歴として残している（新規DBでは実行しない）
+11. G4 の bat / ps1 は自動テストできない（`register-crawl-task.ps1` は構文とログオン時刻の解釈のみ確認、`start-app.bat` は未実行）。手動確認は上の手順5〜7
+12. 上限（1時間50分）を超えて長引いた場合の安全策は「`finishRun` が自分の id かつ running の行だけ更新し、0件ならローカルログに残す」まで。実行中の定期的な生存記録（ハートビート）は無い
+13. `last_boot_marker.txt` は使わなくなったが、`%LOCALAPPDATA%\it-news-app\` に残っている（削除は任意）
+14. `npm run lint` は以前からの5エラー（components 配下の5ファイルで「effect 内の setState」）と警告8件が残っている。G4 の変更とは無関係で、今回は触っていない
 
 ## 次にやること
-1. G1〜G5 に着手（想定順序: G4 → G1 → G2 → G5。G3 は G1 の `source` 列の後）。決定内容は docs/spec.md 5.1
-2. 必要なら 3001 を再ビルドして `/api/health` を確認
+1. 下の「G4 を有効にする手順」を実施（テストDB → 本番DB → 手動確認 → タスク登録）
+2. G4 を main にマージ・push（承認後）
+3. G1 → G2 → G5（G3 は G1 の `source` 列の後）。決定内容は docs/spec.md 5.1
+4. 必要なら 3001 を再ビルドして `/api/health` を確認
+
+## G4 を有効にする手順（すべてユーザーが手で実施。AI は本番に実行しない）
+1. **テスト用DB**: SQL Editor に最新の `supabase/schema.sql` 全文を貼って実行 → もう一度実行（2回とも成功すること）→ `npm run test:rls`（articles 6件＋crawl_runs 5件が全部パスすること。**crawl_runs 側は実DBで未確認**）
+2. **本番の事前確認（読み取りのみ）**: ①`select conname from pg_constraint where conrelid='public.articles'::regclass;` に `articles_url_unique` があること（無い／名前が違うと schema.sql が重複した一意制約を作ろうとする）②現在の権限を控える `select grantee, privilege_type from information_schema.role_table_grants where table_schema='public' and table_name='articles';`（元に戻す材料）③クローラーが動いていないこと
+3. **本番に適用**: SQL Editor で `supabase/schema.sql` 全文を実行 → ②の権限確認をもう一度実行して差分を見る（anon / authenticated は SELECT のみ、service_role は全権限になる）。`crawl_runs` が作られること
+4. **画面確認**: `/`・`/archive`・`/trends`・ブックマークが表示されること。戻すときは控えた権限を `GRANT ... ON public.articles TO anon, authenticated;` で戻す
+5. **手動確認**: ①`npm run crawl:check`（終了コード 0 か 10。`echo %ERRORLEVEL%`）②Ollama を止めた状態で `npm run crawl` → 失敗で終わり、Supabase 管理画面の `crawl_runs` に `failed` が残る ③2つ同時に `npm run crawl` → 後の方が「別の収集が実行中」でスキップ ④通常の `npm run crawl` が最後まで通り `success` が残る
+6. **タスク登録**: PowerShell で `.\scripts\register-crawl-task.ps1`（既定 12:00。変更は `-At 07:30`、解除は `-Remove`）→ `Get-ScheduledTask -TaskName it-news-app-crawl` で確認
+7. 実機で `start-app.bat` を通しで動かし、`%LOCALAPPDATA%\it-news-app\start-app.log` に判定の理由（`crawl:check exit code=...`）が出ること
 
 ## 作業ルール（このプロジェクト）
 - コミット前にブランチ確認、`git add` はファイル名指定（`-A` は使わない）、コミット後 `git show --stat` で README/.env の混入確認

@@ -1,13 +1,13 @@
 # ITニュース行動提案アプリ - 仕様書・設計書
 
-最終更新: 2026-11-01（D1テスト実装済み・G0決定事項を追記）。実装と食い違う場合はコードを正とする。
+最終更新: 2026-11-02（G4 定期実行・実行履歴を実装、D1 テスト反映）。実装と食い違う場合はコードを正とする。
 
 ## 1. 目的と守るべき方針
 * **目的:** 単なるニュースリーダーではなく「今日何をすべきかが分かる」意思決定ツール。
 * **課金ゼロ:** AI推論はローカルの Ollama（モデル `gemma4:e4b-it-q4_K_M`）で行い、外部AIのAPI課金は発生しない。インフラは Supabase 無料枠。
 * **外部AIへの受け渡し:** ChatGPT / Gemini / Claude への深掘りは API を呼ばず、プロンプトをクリップボードにコピーして各社の Web 画面を新しいタブで開く方式（貼り付けはユーザーが行う）。
 * **Supabase RLS:** 読み取りと書き込みを分離する（詳細は 3.2）。ブラウザ側は anon キー、書き込みはサーバー側（クローラー・シード）の service_role キーのみ。キーは `.env.local` から読む。
-* **ポート:** 本番は 3001（`npm run start`）、開発は 3000（`npm run dev`）。`start-app.bat` が「ニュース収集（PC起動ごとに1回）→ビルド→本番起動→ブラウザ表示」を行う。
+* **ポート:** 本番は 3001（`npm run start`）、開発は 3000（`npm run dev`）。`start-app.bat` が「ニュース収集（直近12時間以内に成功した収集が無ければ実行）→ビルド→本番起動→ブラウザ表示」を行う。収集は Windows タスクスケジューラでも1日1回動かす（3.3）。
 
 ## 2. 画面・UI
 * **テーマ:** 初期はダーク（ネオングリーン基調）。ライト/ダークの切替ボタンあり。
@@ -35,17 +35,21 @@ Next.js 16.2.9（App Router）, React 19, TypeScript, Tailwind CSS 4, shadcn/ui,
 * 索引: `(importance desc, published_at desc)`
 * 制約: `url` の UNIQUE（`supabase/schema.sql` に統合済み。`migrations/002_add_url_unique_constraint.sql` は既存DB向けの履歴として残す。クローラーの upsert の基準）
 * **RLS（行レベルセキュリティ）:** 有効。ポリシーは `Public read access`（SELECT のみ、対象は anon と authenticated）の1つだけ。INSERT / UPDATE / DELETE はポリシーを作らないことで anon・authenticated から拒否し、service_role（RLS を迂回する）だけが書き込める。書き込みは GRANT（表の権限。anon / authenticated は SELECT のみ）と RLS の2段で防ぐ。テストは結果（行が変わらないこと）で判定する。
+* **`crawl_runs`（実行履歴・二重実行の防止）:** `id`, `job_type`（crawl / metrics / digest）, `status`（running / success / failed）, `started_at`, `finished_at`, `success_count`, `failure_count`, `error_summary`。同じ `job_type` の `running` は1行だけ（部分一意索引。2つ目の開始は 23505 で失敗＝スキップ）。RLS は有効でポリシーなし、`anon` / `authenticated` の権限は全て取り消し、`service_role` のみ全権限（確認は Supabase 管理画面）。
 * **RLS のテスト:** テスト専用の別プロジェクトで実行。`.env.test` に `TEST_SUPABASE_URL` / `TEST_SUPABASE_ANON_KEY` / `TEST_SUPABASE_SERVICE_ROLE_KEY` を置く（コミットしない）。
   * anon: SELECT 成功（テスト行が読める）/ INSERT・UPDATE・DELETE は「42501 エラー」または「エラーなしで0件」のどちらでも合格（それ以外のエラーは不合格）。どの場合も service_role で再取得し、INSERT は試した url の行が無いこと、UPDATE・DELETE は対象行が元のままであることを確認。
   * service_role でテスト行を投入し、終了時に削除（url に `test-` 接頭辞）。
   * テスト用DBへのスキーマ適用元は `schema.sql` に一本化済み（何度実行しても壊れない書き方）。テスト用DBへの適用は手動。
 
 ### 3.3 データ収集（`npm run crawl` → `src/scripts/crawler.ts`）
-1. Ollama の起動待ち（最大120秒）・モデル確認・試し生成。
-2. RSS 6本（Zenn, Qiita, はてなブックマーク(IT), Google AI Blog, ITmedia AI+, TechCrunch AI）から合計最大18件を取得。30日より古い記事は除外。1本の取得失敗は他に影響させずスキップ。
-3. Python で本文抽出（trafilatura）→ 失敗時は RSS の抜粋を使う。タイトルのあいまい一致（rapidfuzz、類似度90）で重複除外 → 失敗時は除外しない。Python 環境が無い場合は両方スキップ。
-4. 1記事ずつ Ollama で推論（要約・変化・行動提案・カテゴリ・優先度・点数を日本語の JSON で出力）。JSON 不正や翻訳漏れの場合は最大2回試す。
-5. `url` を基準に Supabase へ upsert。推論・保存に失敗した記事はスキップして続行。
+実行のきっかけは3つ: 手動の `npm run crawl`、`start-app.bat`（直近12時間以内に成功した収集が無いときだけ）、タスクスケジューラ（`scripts/register-crawl-task.ps1` で登録、毎日 12:00 が既定・`-At` で変更・時刻を逃したら起動後に実行・ログオン中のみ。登録は手動）。
+1. `crawl_runs` に `running` を記録して開始。同じ種別が実行中ならスキップして終了（開始から2時間を過ぎた `running` は異常終了として失効させ、`failed` にする）。DB に記録できないときは中止（記録先は 3.5）。
+2. Ollama の起動待ち（最大120秒）・モデル確認・試し生成。
+3. RSS 6本（Zenn, Qiita, はてなブックマーク(IT), Google AI Blog, ITmedia AI+, TechCrunch AI）から合計最大18件を取得。30日より古い記事は除外。1本の取得失敗は他に影響させずスキップ。
+4. Python で本文抽出（trafilatura）→ 失敗時は RSS の抜粋を使う。タイトルのあいまい一致（rapidfuzz、類似度90）で重複除外 → 失敗時は除外しない。Python 環境が無い場合は両方スキップ。
+5. 1記事ずつ Ollama で推論（要約・変化・行動提案・カテゴリ・優先度・点数を日本語の JSON で出力）。JSON 不正や翻訳漏れの場合は最大2回試す。**全体の時間上限は1時間50分**: 記事を始める前、および Ollama 呼び出し1回ごと（再試行を含む）に残り時間を計算し直し、タイムアウトを「通常5分」と「残り時間」の短い方にする。残りが30秒未満なら Ollama を呼ばずに打ち切り、その記事と残りは「未処理」（失敗に数えない。次回の実行で再挑戦）。
+6. `url` を基準に Supabase へ upsert。推論・保存に失敗した記事はスキップして続行。
+7. `crawl_runs` の自分の行（id かつ `running`）を `success` / `failed` に更新して終了。**成功の定義:** 致命的エラーなしで1件以上保存できた実行（一部の記事の失敗・時間上限での打ち切りがあっても成功。件数は `success_count` / `failure_count`）。**失敗:** Ollama 不在・DB 不可などの致命的エラー、RSS 取得0件、保存0件。失敗時はプロセスの終了コードも1。
 
 ### 3.4 trend_diff の意味
 `trend_diff` は **DB の過去記事や前回の収集結果と比較して作った差分ではない**。AI が1記事の本文抜粋だけを読み、「前回や既存技術からの変化・差分」を推測して書いたもの。
@@ -54,15 +58,17 @@ Next.js 16.2.9（App Router）, React 19, TypeScript, Tailwind CSS 4, shadcn/ui,
 * **Ollama 呼び出し（`lib/ollama/client.ts`）:** タイムアウト5分。接続エラーと HTTP 5xx は最大3回試行（待機2秒→4秒、合計60秒以内）。タイムアウトと 4xx は再試行しない。失敗・再試行は JSON 1行の構造化ログ（timestamp, level, logger_name, message, model, attempt, error_type 等）で出力。プロンプトやキーは出さない。
 * **起動確認（`lib/ollama/health.ts`）:** 接続不可・モデル未導入は種類別の例外で明示的に失敗。
 * **`/api/health`:** アプリ・Ollama（ok / unreachable / model_missing）・モデル名・確認時刻を返す（常に HTTP 200）。
-* **クローラー:** 進捗と失敗はコンソールにのみ出力。ファイルやDBには残らない。記事単位の失敗はスキップして続行し、致命的エラーは終了コード1で終了。
-* **`start-app.bat`:** `%LOCALAPPDATA%\it-news-app\start-app.log` に時刻付きで記録（収集を実行/スキップした理由、Ollama 待機結果、Docker 起動の成否など）。
+* **クローラー:** 進捗と失敗はコンソールに出力。実行ごとの結果は `crawl_runs` に記録する（開始・終了時刻、成功/失敗件数、`error_summary`）。`error_summary` はエラーの種類名と固定の短い文だけで、`error.message`・キー・記事本文は入れない（URL・`eyJ…`・20文字以上の英数字列は `****`、200文字まで）。DB に記録できないときは `%LOCALAPPDATA%\it-news-app\crawl-fallback.log` に JSON 1行で残す（`SUPABASE_URL` / `SERVICE_ROLE_KEY` の未設定もここ）。記事単位の失敗はスキップして続行し、致命的エラーは終了コード1で終了。Ctrl+C は可能な範囲で `failed` として記録（できなければ2時間で失効）。
+* **`start-app.bat`:** `%LOCALAPPDATA%\it-news-app\start-app.log` に時刻付きで記録（収集を実行/スキップした理由、Ollama 待機結果、Docker 起動の成否など）。収集するかは `npm run crawl:check`（`src/scripts/crawl-check.ts`）の終了コードで決める: 0=実行（直近12時間以内の成功が無く、実行中でもない）/ 10=スキップ（12時間以内に成功済み、または2時間未満の `running` がある）/ その他=確認失敗（安全側でスキップして警告を記録）。起動時刻マーカー（`last_boot_marker.txt`）は使わない（ファイルは残置）。
+* **タスクスケジューラ:** `scripts/run-crawl.bat` が `npm run crawl` を実行し、出力と開始・終了を `%LOCALAPPDATA%\it-news-app\crawl-task.log` に追記。12時間ルールは使わず毎日実行（重なった場合は `crawl_runs` の二重実行防止が止める）。
 * **画面側:** 記事取得失敗はエラー文を表示。`/api/trends` 失敗時は HTTP 500 とエラー文。
-* **未整備:** 収集の実行履歴（いつ・何件成功/失敗したか）を後から追える保存先は無い。
 
 ### 3.6 テスト（フェーズD1）
 * `npm test`（Vitest。lib は node 環境、コンポーネントは jsdom＋RTL）: 外部接続なし（`fetch` はモック）。テストファイルは対象と同じ場所に `*.test.ts(x)`。
 * `npm run test:rls`: `.env.test` が無い／値が空ならスキップ。`TEST_SUPABASE_URL` が `.env.local` の本番URLと同じ、または本番URLを確認できないときは即停止（`lib/supabase/test-env.ts`）。
 * `extractJson` の確認ケース: 素のJSON / ```json囲み / 前後に説明文 / 入れ子の括弧 / 不正JSONは取り出し後の JSON.parse で例外。空文字は空文字を返す（現行動作を維持）。
+* 実行履歴まわり（`lib/crawl/`、`npm test`・ネットワークなし・偽の `RunStore` と偽の時計）: 開始/終了の記録、成功・失敗の判定、二重実行のスキップ、`running` の失効（1時間59分は有効・2時間1分は無効）、時間上限での打ち切り（再試行のたびに `timeoutMs` が縮む・残り30秒未満は呼ばずに未処理・打ち切りでも記録される）、`finishRun` は自分の id かつ `running` の行だけ更新、DB 不可時のローカルログ、12時間スキップ判定の境界、`error_summary` の伏せ字。
+* `npm run test:rls` に `crawl_runs` を追加: anon は読めない（「42501 エラー」または「0件」のどちらも合格）・書けない、service_role は読み書きできる、同じ種別の `running` は2つ作れない（23505）、Supabase 版 `RunStore` の動作。テストは未使用の `job_type=digest` の行だけを使い、終了時に削除。
 * pytest（python/venv）: 本文抽出は保存済みHTMLを入力に使う（ネットワークなし）。重複判定は類似度 89/90/91 の境界と、失敗時に「除外しない」動作を確認。
 
 ## 4. 実装状況
@@ -74,7 +80,8 @@ Next.js 16.2.9（App Router）, React 19, TypeScript, Tailwind CSS 4, shadcn/ui,
 | ソース名の保存（今は `category` のみで、出どころ名の列は無い） | 未実装（予定 G1） |
 | 話題度スコア | 未実装（予定 G2） |
 | 手動URL投入 | 未実装（予定 G3） |
-| 定期実行 | 未実装（予定 G4） |
+| 定期実行（タスクスケジューラ＋`start-app.bat` の12時間判定） | 実装済み（G4。タスクの登録は手動で `scripts/register-crawl-task.ps1`。本番DBへの `crawl_runs` 作成後に有効） |
+| 実行履歴（`crawl_runs`）・二重実行の防止・全体の時間上限 | 実装済み（G4。本番DBへの適用は手動） |
 | 週次まとめ | 未実装（検討中 G5） |
 | RLS テスト（`npm run test:rls`） | 実装済み（`.env.test` が揃っているときだけ実行） |
 | ユニットテスト（Vitest / pytest） | 実装済み |
@@ -94,7 +101,7 @@ G0 の要判断12件は回答済み（5.1）。想定順序: D1 → G4 → G1 �
 * `priority_label` と `importance` の重複：案：片方を廃止、または `importance` を `priority_label` から導出する（`/api/trends` が `importance` を使うため保留）。
 * `trend_diff` を過去記事との比較に基づく内容にする。
 * 収集元の設定ファイル化。
-* `schema.sql` の GRANT を本番DBへ適用するか。
+* `schema.sql` の GRANT を本番DBへ適用するか。G4 で `crawl_runs` を本番に作る際に schema.sql を流すと、`articles` の GRANT も同時に適用される（本番は it-news-app 専用で、anon による書き込みは無いため影響なしと判断。手順は progress.md）。
 
 ## 6. エージェント構成の検討
 * **結論:** サブエージェント、AIチーム／マルチエージェントは使わない（2026-11時点）。
