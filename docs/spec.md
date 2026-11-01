@@ -1,6 +1,6 @@
 # ITニュース行動提案アプリ - 仕様書・設計書
 
-最終更新: 2026-10-11（実装に合わせて全面改訂）。実装と食い違う場合はコードを正とする。
+最終更新: 2026-11-01（D1テスト実装済み・G2/G4/G5検討案を追記）。実装と食い違う場合はコードを正とする。
 
 ## 1. 目的と守るべき方針
 * **目的:** 単なるニュースリーダーではなく「今日何をすべきかが分かる」意思決定ツール。
@@ -33,9 +33,12 @@ Next.js 16.2.9（App Router）, React 19, TypeScript, Tailwind CSS 4, shadcn/ui,
 * `importance` (INT): 1〜5。AI が出した 1〜10 の点数を 2 で割って丸めた値
 * `published_at` (TIMESTAMPTZ): RSS の公開日時
 * 索引: `(importance desc, published_at desc)`
-* 制約: `url` の UNIQUE（`supabase/migrations/002_add_url_unique_constraint.sql` で追加。クローラーの upsert の基準）
+* 制約: `url` の UNIQUE（`supabase/schema.sql` に統合済み。`migrations/002_add_url_unique_constraint.sql` は既存DB向けの履歴として残す。クローラーの upsert の基準）
 * **RLS（行レベルセキュリティ）:** 有効。ポリシーは `Public read access`（SELECT のみ、対象は anon と authenticated）の1つだけ。INSERT / UPDATE / DELETE はポリシーを作らないことで anon・authenticated から拒否し、service_role（RLS を迂回する）だけが書き込める。
-* **RLS のテスト:** 別プロジェクトを使う構想で、`.env.test` に `TEST_SUPABASE_URL` / `TEST_SUPABASE_ANON_KEY` を置く。**テストコードは未作成**（progress.md の D1 Step 7）。
+* **RLS のテスト:** テスト専用の別プロジェクトで実行。`.env.test` に `TEST_SUPABASE_URL` / `TEST_SUPABASE_ANON_KEY` / `TEST_SUPABASE_SERVICE_ROLE_KEY` を置く（コミットしない）。
+  * anon: SELECT 成功 / INSERT は 42501 エラー / UPDATE・DELETE は RLS で拒否されてもエラーにならず0件扱いのため、service_role で再取得し行が不変であることを確認。
+  * service_role でテスト行を投入し、終了時に削除（url に `test-` 接頭辞）。
+  * テスト用DBへのスキーマ適用元は `schema.sql` に一本化済み（何度実行しても壊れない書き方）。テスト用DBへの適用は手動。
 
 ### 3.3 データ収集（`npm run crawl` → `src/scripts/crawler.ts`）
 1. Ollama の起動待ち（最大120秒）・モデル確認・試し生成。
@@ -56,6 +59,12 @@ Next.js 16.2.9（App Router）, React 19, TypeScript, Tailwind CSS 4, shadcn/ui,
 * **画面側:** 記事取得失敗はエラー文を表示。`/api/trends` 失敗時は HTTP 500 とエラー文。
 * **未整備:** 収集の実行履歴（いつ・何件成功/失敗したか）を後から追える保存先は無い。
 
+### 3.6 テスト（フェーズD1）
+* `npm test`（Vitest。lib は node 環境、コンポーネントは jsdom＋RTL）: 外部接続なし（`fetch` はモック）。テストファイルは対象と同じ場所に `*.test.ts(x)`。
+* `npm run test:rls`: `.env.test` が無い／値が空ならスキップ。`TEST_SUPABASE_URL` が `.env.local` の本番URLと同じ、または本番URLを確認できないときは即停止（`lib/supabase/test-env.ts`）。
+* `extractJson` の確認ケース: 素のJSON / ```json囲み / 前後に説明文 / 入れ子の括弧 / 不正JSONは取り出し後の JSON.parse で例外。空文字は空文字を返す（現行動作を維持）。
+* pytest（python/venv）: 本文抽出は保存済みHTMLを入力に使う（ネットワークなし）。重複判定は類似度 89/90/91 の境界と、失敗時に「除外しない」動作を確認。
+
 ## 4. 実装状況
 | 項目 | 状態 |
 |---|---|
@@ -66,13 +75,18 @@ Next.js 16.2.9（App Router）, React 19, TypeScript, Tailwind CSS 4, shadcn/ui,
 | 話題度スコア | 未実装（予定 G2） |
 | 手動URL投入 | 未実装（予定 G3） |
 | 定期実行 | 未実装（予定 G4） |
-| RLS テスト | 未実装（D1 Step 7） |
+| 週次まとめ | 未実装（検討中 G5） |
+| RLS テスト（`npm run test:rls`） | 実装済み（`.env.test` が揃っているときだけ実行） |
+| ユニットテスト（Vitest / pytest） | 実装済み |
 
-G1〜G4 は progress.md の「G0 の要判断12件」への回答後に着手する。
+G1〜G4 は progress.md の「G0 の要判断12件」への回答後に着手する。想定順序: D1 → G4 → G1 → G2 → G5（G2 は G4 の定期実行、G5 は G2 の話題度に依存）。
 
 ## 5. 検討中の案（未決定・本文の仕様ではない）
 * `priority_label` と `importance` の重複：どちらも AI の出力から作られ、表示・並びに効くのは `priority_label` のみ（`importance` は `/api/trends` の抽出順と索引で使用）。案：片方を廃止、または `importance` を `priority_label` から導出する。
 * `source`（出どころ名）、話題度、手動投入を示す列の追加（G1〜G3 と連動）。
 * `trend_diff` を過去記事との比較に基づく内容にする。
-* クローラーの実行履歴を DB またはログファイルに残す。
-* `schema.sql` に `url` の UNIQUE を統合し、migrations との二重管理をやめる。
+* クローラーの実行履歴を DB またはログファイルに残す。案：`crawl_runs` テーブル（処理種別〔収集/話題度計測/週次まとめ〕、開始・終了時刻、成功・失敗件数、エラー概要）。
+* **G2 話題度:** X の代わりに、はてなブックマーク数（無料・キー不要）を使う。累計値のため毎日スナップショットを `article_metrics`（`article_id`, `measured_at`, `hatena_count`）に保存し、7日間の増加量を話題度とする。計測が抜けた日は直近2回の差で計算。
+* **G4 定期実行:** GitHub Actions はローカルの Ollama に届かないため、Windows タスクスケジューラ または `start-app.bat` の延長で行う。
+* **G5 週次まとめ:** 話題度上位5本（G2 前は `priority_label` 上位で代替）を「事実」（`summary`）と「示唆」（`action_individual` / `action_enterprise`）に分けて構成し、LLM は総括のみ生成。保存先 `weekly_digests`（`week_start`, `content` JSON, `created_at`）、RLS は読み取りのみ公開。出力 JSON は `extractJson` で取り出す。
+* 参考: MameTech News（technews.mametaro.dev）。Grok Bot・Cursor SDK は課金が発生するため採用しない。
