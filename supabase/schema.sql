@@ -56,3 +56,33 @@ create policy "Public read access"
 
 -- INSERT/UPDATE/DELETE は service_role のみ（バックエンド/シードスクリプト経由）に限定し、
 -- ポリシーを追加しないことでanon/authenticatedからの書き込みを拒否する。
+
+-- ============================================================
+-- crawl_runs: 収集などのバッチ処理の実行履歴と、二重実行の防止
+-- ============================================================
+-- 書き込み・読み取りとも service_role のみ（クローラー等のサーバー側）。
+-- RLS は有効にし、ポリシーは作らない。anon / authenticated は権限も与えない（確認は管理画面）。
+create table if not exists public.crawl_runs (
+  id uuid primary key default gen_random_uuid(),
+  job_type varchar not null check (job_type in ('crawl', 'metrics', 'digest')),
+  status varchar not null check (status in ('running', 'success', 'failed')),
+  started_at timestamptz not null default now(),
+  finished_at timestamptz,
+  success_count int not null default 0,
+  failure_count int not null default 0,
+  error_summary text
+);
+
+-- 同じ種別の running は1行だけ。2つ目の開始は一意制約違反（23505）になり、二重実行を防ぐ。
+create unique index if not exists crawl_runs_one_running_idx
+  on public.crawl_runs (job_type)
+  where status = 'running';
+
+-- 「直近の成功」を探すための索引。
+create index if not exists crawl_runs_job_started_idx
+  on public.crawl_runs (job_type, started_at desc);
+
+alter table public.crawl_runs enable row level security;
+
+revoke all on public.crawl_runs from anon, authenticated;
+grant all on public.crawl_runs to service_role;
