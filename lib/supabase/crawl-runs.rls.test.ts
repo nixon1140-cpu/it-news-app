@@ -8,6 +8,7 @@ import { randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { createSupabaseRunStore } from "../crawl/run-store";
 import { loadRlsEnv } from "./test-env";
 
 const envResult = loadRlsEnv();
@@ -24,8 +25,10 @@ describe.skipIf(envResult.status !== "ready")("crawl_runs の権限と二重実�
   let anon: SupabaseClient;
   let service: SupabaseClient;
 
+  // テストは未使用の job_type（digest）だけを使うので、その種別の行をすべて削除する
+  // （error_summary が null の running 行や、失効処理で書き換わった行も残さない）。
   async function cleanup() {
-    await service.from("crawl_runs").delete().like("error_summary", "test-%");
+    await service.from("crawl_runs").delete().eq("job_type", "digest");
   }
 
   async function fetchByMarker() {
@@ -107,6 +110,40 @@ describe.skipIf(envResult.status !== "ready")("crawl_runs の権限と二重実�
       .like("error_summary", `${marker}%`);
     expect(anonRows).toHaveLength(before.length);
     expect(await fetchByMarker()).toEqual(before);
+  });
+
+  it("Supabase 版 RunStore: 二重実行防止・自分の running だけ更新・失効の動作", async () => {
+    const store = createSupabaseRunStore(service);
+    const started = new Date();
+
+    const first = await store.tryInsertRunning("digest", started);
+    expect(first?.id).toBeTruthy();
+    // 実行中なので2つ目は null（スキップ）
+    expect(await store.tryInsertRunning("digest", started)).toBeNull();
+    expect((await store.currentRunning("digest"))?.startedAt).toBeInstanceOf(Date);
+
+    // 開始が cutoff より新しい running は失効させない
+    expect(await store.expireStale("digest", new Date(started.getTime() - 60_000))).toBe(0);
+
+    const update = {
+      status: "success" as const,
+      finishedAt: new Date(),
+      successCount: 2,
+      failureCount: 1,
+      errorSummary: `${marker}-store`,
+    };
+    // 自分の id かつ running なら更新できる。もう一度は running ではないので0件（false）
+    expect(await store.finish(first!.id, update)).toBe(true);
+    expect(await store.finish(first!.id, update)).toBe(false);
+    expect((await store.latestSuccess("digest"))?.finishedAt).toBeInstanceOf(Date);
+
+    // 古い running は失効して failed になり、その後の finish は行を変えない
+    const second = await store.tryInsertRunning("digest", new Date(started.getTime() - 3 * 60 * 60 * 1000));
+    expect(second?.id).toBeTruthy();
+    expect(await store.expireStale("digest", new Date(started.getTime() - 2 * 60 * 60 * 1000))).toBe(1);
+    expect(await store.finish(second!.id, update)).toBe(false);
+    const { data } = await service.from("crawl_runs").select("status").eq("id", second!.id).single();
+    expect(data?.status).toBe("failed");
   });
 
   it("同じ種別の running を2つ作ると、2つ目は一意制約（23505）で失敗する", async () => {
