@@ -21,7 +21,8 @@ async function check(): Promise<number> {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) {
-    console.log("check-error: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY が未設定");
+    // start-app.bat のログ（コードページ依存）で文字化けしないよう、この行は ASCII にしている。
+    console.log("check-error: missing SUPABASE env");
     return EXIT_ERROR;
   }
 

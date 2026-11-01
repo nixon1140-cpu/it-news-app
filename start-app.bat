@@ -4,58 +4,46 @@ setlocal enabledelayedexpansion
 rem Move to the app folder (path is hardcoded based on past troubleshooting).
 cd C:\Users\okina\it-news-app
 
-rem State files used to run the crawler only once per Windows boot session.
+rem State/log folder. (The old last_boot_marker.txt is no longer used; it is left in place.)
 set "STATE_DIR=%LOCALAPPDATA%\it-news-app"
-set "MARKER_FILE=%STATE_DIR%\last_boot_marker.txt"
 set "LOG_FILE=%STATE_DIR%\start-app.log"
+set "CHECK_OUT=%STATE_DIR%\crawl-check.out"
 
 if not exist "%STATE_DIR%" mkdir "%STATE_DIR%"
 
-rem Get the current Windows boot time as a fixed yyyyMMddHHmmss string.
-rem wmic is deprecated/removed on some systems, so use Get-CimInstance instead.
-set "CURRENT_BOOT="
-for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "try { (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToString('yyyyMMddHHmmss') } catch { '' }"`) do (
-    set "CURRENT_BOOT=%%A"
-)
-rem Trim stray whitespace/newlines that for /f can introduce.
-for /f "tokens=* delims= " %%B in ("!CURRENT_BOOT!") do set "CURRENT_BOOT=%%B"
-
-call :log "Current boot time: [!CURRENT_BOOT!]"
-
-set "PREVIOUS_BOOT="
-if exist "%MARKER_FILE%" (
-    for /f "usebackq delims=" %%C in ("%MARKER_FILE%") do set "PREVIOUS_BOOT=%%C"
-    for /f "tokens=* delims= " %%D in ("!PREVIOUS_BOOT!") do set "PREVIOUS_BOOT=%%D"
-)
-
 rem Decide whether to run the crawler this time.
+rem The decision is made by "crawl:check" (src/scripts/crawl-check.ts), which looks at the crawl_runs table:
+rem   exit 0  = run (no successful crawl within the last 12 hours, and none running)
+rem   exit 10 = skip (a crawl succeeded within 12 hours, or one is running)
+rem   other   = the check itself failed; skip as a safe default (same policy as before)
 set "RUN_CRAWLER=0"
 set "REASON="
+set "CHECK_LINE="
 
-if "!CURRENT_BOOT!"=="" goto decision_boot_time_failed
-if not exist "%MARKER_FILE%" goto decision_first_run
-if not "!CURRENT_BOOT!"=="!PREVIOUS_BOOT!" goto decision_boot_changed
-goto decision_same_boot
+call :log "Checking whether to crawl (crawl_runs: success within 12h?)"
+call npx tsx src/scripts/crawl-check.ts > "%CHECK_OUT%" 2>&1
+set "CHECK_CODE=!ERRORLEVEL!"
+if exist "%CHECK_OUT%" for /f "usebackq delims=" %%L in ("%CHECK_OUT%") do set "CHECK_LINE=%%L"
+call :log "crawl:check exit code=!CHECK_CODE! / !CHECK_LINE!"
 
-:decision_boot_time_failed
+if "!CHECK_CODE!"=="0" goto decision_run
+if "!CHECK_CODE!"=="10" goto decision_skip
+goto decision_check_failed
+
+:decision_run
+set "RUN_CRAWLER=1"
+set "REASON=No successful crawl within 12 hours and none running"
+goto decision_done
+
+:decision_skip
 set "RUN_CRAWLER=0"
-set "REASON=Failed to read boot time (empty value), skipping crawler as a safe default"
+set "REASON=Successful crawl within 12 hours, or a crawl is already running"
+goto decision_done
+
+:decision_check_failed
+set "RUN_CRAWLER=0"
+set "REASON=crawl:check failed (exit code !CHECK_CODE!), skipping crawler as a safe default"
 call :log "WARNING: !REASON!"
-goto decision_done
-
-:decision_first_run
-set "RUN_CRAWLER=1"
-set "REASON=Marker file does not exist (first run)"
-goto decision_done
-
-:decision_boot_changed
-set "RUN_CRAWLER=1"
-set "REASON=Boot time differs from marker (first run after a PC restart)"
-goto decision_done
-
-:decision_same_boot
-set "RUN_CRAWLER=0"
-set "REASON=Boot time matches marker (re-run within the same boot session)"
 goto decision_done
 
 :decision_done
@@ -91,13 +79,10 @@ rem 1. Run the crawler to fetch the latest news (wait for completion).
 call npm run crawl
 call :log "Crawler executed."
 
-if "!CURRENT_BOOT!"=="" goto after_crawler
-> "%MARKER_FILE%" echo !CURRENT_BOOT!
-call :log "Marker file updated: !CURRENT_BOOT!"
 goto after_crawler
 
 :skip_crawler
-echo Skipping crawler (already run this boot session)...
+echo Skipping crawler (recent success or already running)...
 call :log "Crawler skipped."
 
 :after_crawler
