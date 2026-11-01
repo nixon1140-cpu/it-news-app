@@ -1,5 +1,6 @@
 -- ITニュース行動提案アプリ: articles テーブル定義
--- Supabase SQL Editor で実行してください。
+-- Supabase SQL Editor で実行してください。何度実行しても壊れないように書いてあります。
+-- （url の UNIQUE 制約は、以前 migrations/002 に分かれていたものをここに統合しました。）
 
 create table if not exists public.articles (
   id uuid primary key default gen_random_uuid(),
@@ -15,12 +16,31 @@ create table if not exists public.articles (
   published_at timestamptz not null default now()
 );
 
+-- クローラーが url で重複判定して upsert するための一意制約。
+-- 既に作成済みのテーブルでも追加できるよう、無いときだけ追加する。
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'articles_url_unique'
+      and conrelid = 'public.articles'::regclass
+  ) then
+    alter table public.articles
+      add constraint articles_url_unique unique (url);
+  end if;
+end
+$$;
+
 create index if not exists articles_priority_sort_idx
   on public.articles (importance desc, published_at desc);
 
 alter table public.articles enable row level security;
 
 -- 一覧・詳細表示はクライアント（anon key）からの読み取りのみ許可。
+-- create policy には if not exists が無いため、先に削除してから作り直す（再実行対策）。
+drop policy if exists "Public read access" on public.articles;
+
 create policy "Public read access"
   on public.articles
   for select
