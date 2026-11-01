@@ -41,6 +41,24 @@ describe("extractJson", () => {
     expect(extractJson("")).toBe("");
   });
 
+  it("入れ子の括弧は最外の{}を壊さずに抜き出す", () => {
+    const input = 'Result: {"a":{"b":{"c":1}},"list":[{"x":1},{"y":2}]} done';
+    const json = extractJson(input);
+    expect(json).toBe('{"a":{"b":{"c":1}},"list":[{"x":1},{"y":2}]}');
+    expect(JSON.parse(json)).toEqual({ a: { b: { c: 1 } }, list: [{ x: 1 }, { y: 2 }] });
+  });
+
+  // extractJson自体は例外を投げず、文字列を返すだけ。不正JSON・空文字が例外になるのは
+  // 呼び出し側（crawler.ts / trends route）が後段で行うJSON.parseの時点であり、その流れを固定する。
+  it("不正JSONを返した場合、後段のJSON.parseで例外になる", () => {
+    expect(() => JSON.parse(extractJson('{"title": "foo",}'))).toThrow(SyntaxError);
+    expect(() => JSON.parse(extractJson("not json at all"))).toThrow(SyntaxError);
+  });
+
+  it("空文字を返した場合、後段のJSON.parseで例外になる", () => {
+    expect(() => JSON.parse(extractJson(""))).toThrow(SyntaxError);
+  });
+
   // 型定義上はstringのみを受け付けるが、実行時にnull/undefinedが渡された場合の
   // 実際の挙動（TypeErrorをスローする）をそのまま固定する。
   // NOTE: これはLLM応答が空/欠落した場合にクラッシュする経路になり得るため、
