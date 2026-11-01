@@ -1,8 +1,10 @@
 @echo off
 setlocal enabledelayedexpansion
 
-rem Move to the app folder (path is hardcoded based on past troubleshooting).
-cd C:\Users\okina\it-news-app
+rem Move to the app folder (the folder this .bat lives in; ends with a backslash).
+rem Defined here, before any "call": inside a called label %~dp0 would not expand to this file's folder.
+set "APP_DIR=%~dp0"
+cd /d "%APP_DIR%"
 
 rem State/log folder. (The old last_boot_marker.txt is no longer used; it is left in place.)
 set "STATE_DIR=%LOCALAPPDATA%\it-news-app"
@@ -156,7 +158,7 @@ goto architect_ai_skip
 
 :docker_ready
 call :log "Docker Desktop is ready (docker info succeeded)."
-cd /d C:\Users\okina\architect-ai
+cd /d "%APP_DIR%..\architect-ai"
 docker compose up -d >nul 2>&1
 if "!ERRORLEVEL!"=="0" goto architect_ai_started
 call :log "WARNING: docker compose up -d failed for ArchitectAI (exit code !ERRORLEVEL!)."
@@ -170,7 +172,7 @@ goto architect_ai_done
 goto architect_ai_done
 
 :architect_ai_done
-cd /d C:\Users\okina\it-news-app
+cd /d "%APP_DIR%"
 
 exit /b 0
 
