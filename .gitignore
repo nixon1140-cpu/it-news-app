@@ -55,3 +55,4 @@ supabase/*.txt
 
 # Portfolio screenshots (kept in the portfolio repo, not here)
 docs/screenshots/
+python/tests/__pycache__/

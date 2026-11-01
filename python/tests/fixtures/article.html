@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>テスト記事: ローカルLLMでニュースを要約する</title>
+  <meta property="og:title" content="テスト記事: ローカルLLMでニュースを要約する">
+  <meta property="article:published_time" content="2026-07-10T09:00:00+09:00">
+</head>
+<body>
+  <header><nav><a href="/">ホーム</a> <a href="/about">About</a></nav></header>
+  <main>
+    <article>
+      <h1>テスト記事: ローカルLLMでニュースを要約する</h1>
+      <p>ローカルで動かす大規模言語モデルを使うと、外部サービスへの課金なしにニュース記事を要約できます。この記事では、収集した記事の本文を一件ずつモデルに渡し、要約と行動提案を日本語で生成する流れを紹介します。</p>
+      <p>処理は一件ずつ順番に行います。モデルの出力が壊れたJSONになる場合があるため、取り出した文字列を検証し、失敗したときは最大二回まで再試行します。それでも失敗した記事はスキップして、全体の処理を続けます。</p>
+      <p>本文の抽出には専用のライブラリを使い、広告やナビゲーションなどの不要な部分を取り除きます。抽出に失敗したときは、フィードに含まれる抜粋文をそのまま利用します。</p>
+    </article>
+  </main>
+  <footer><p>Copyright 2026 Example</p></footer>
+</body>
+</html>
