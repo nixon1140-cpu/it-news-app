@@ -11,6 +11,7 @@ const FIXED_MESSAGES: Record<string, string> = {
   OllamaHttpError: "OllamaがHTTPエラーを返しました",
   OllamaModelNotFoundError: "Ollamaのモデルが見つかりません",
   TimeBudgetExhaustedError: "時間上限に達しました",
+  CrawlInterruptedError: "実行が中断されました",
 };
 
 // 自由な文字列に含まれ得る秘密らしきものを伏せ字にし、長さを切り詰める。

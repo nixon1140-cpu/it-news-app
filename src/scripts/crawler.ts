@@ -16,6 +16,10 @@ import dotenv from "dotenv";
 import Parser from "rss-parser";
 import { createClient } from "@supabase/supabase-js";
 
+import { createFileFallbackLogger, getStateDir } from "../../lib/crawl/fallback-log";
+import { processItems, TimeBudgetExhaustedError, type TimeBudget } from "../../lib/crawl/process-items";
+import { buildOutcome, finishRun, startRun } from "../../lib/crawl/run-recorder";
+import { createSupabaseRunStore } from "../../lib/crawl/run-store";
 import { extractJson, generateJson } from "../../lib/ollama/client";
 import { waitForOllamaReady } from "../../lib/ollama/health";
 import type { Article, PriorityLabel } from "../../lib/types/article";
@@ -166,8 +170,17 @@ const OLLAMA_MODEL = "gemma4:e4b-it-q4_K_M";
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+// DB に記録できないとき（開始前の環境変数不足を含む）の記録先: %LOCALAPPDATA%\it-news-app\crawl-fallback.log
+const fallbackLog = createFileFallbackLogger();
+
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY が未設定です。");
+  // 値は出さず、不足していることだけ記録して終了する（DB にはまだ記録できない）。
+  fallbackLog.write({
+    message: "SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY が未設定のため収集を中止しました",
+    error_type: "MissingEnv",
+  });
+  console.error(`SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY が未設定です。（記録: ${getStateDir()}\\crawl-fallback.log）`);
+  process.exit(1);
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -342,11 +355,16 @@ function looksUntranslated(inference: Pick<AIInference, "title" | "summary">): b
   return japaneseChars < text.length * 0.2 && asciiLetters > text.length * 0.4;
 }
 
-async function requestInference(prompt: string): Promise<Record<string, unknown>> {
+// Ollama 1回の呼び出しの通常のタイムアウト（lib/ollama/client.ts の既定値と同じ5分）。
+const OLLAMA_CALL_TIMEOUT_MS = 300_000;
+
+async function requestInference(prompt: string, budget: TimeBudget): Promise<Record<string, unknown>> {
+  // 呼び出しのたびに残り時間を計算し直す。残りが少なければ TimeBudgetExhaustedError で打ち切る。
   const raw = await generateJson(prompt, {
     model: OLLAMA_MODEL,
     system: SYSTEM_PROMPT,
     format: "json",
+    timeoutMs: budget.timeoutMs(OLLAMA_CALL_TIMEOUT_MS),
   });
   return JSON.parse(extractJson(raw));
 }
@@ -371,7 +389,7 @@ function toInference(item: FeedItem, parsed: Record<string, unknown>): AIInferen
 
 const MAX_INFERENCE_ATTEMPTS = 2;
 
-async function inferArticleDetails(item: FeedItem): Promise<AIInference> {
+async function inferArticleDetails(item: FeedItem, budget: TimeBudget): Promise<AIInference> {
   let lastError: Error | null = null;
 
   for (let attempt = 1; attempt <= MAX_INFERENCE_ATTEMPTS; attempt++) {
@@ -381,7 +399,7 @@ async function inferArticleDetails(item: FeedItem): Promise<AIInference> {
         attempt > 1
           ? "前回の出力はJSONとして不正でした。必ず有効な1行のJSONのみを出力してください。"
           : undefined;
-      const parsed = await requestInference(buildInferencePrompt(item, extraReminder));
+      const parsed = await requestInference(buildInferencePrompt(item, extraReminder), budget);
       const inference = toInference(item, parsed);
 
       // 翻訳漏れ（英語のまま）を検出した場合、日本語化を強く念押しして1回だけ再試行する。
@@ -390,13 +408,16 @@ async function inferArticleDetails(item: FeedItem): Promise<AIInference> {
           buildInferencePrompt(
             item,
             "前回の出力は英語のままでした。title・summary・action_plan等は必ず自然な日本語に翻訳し直してください。"
-          )
+          ),
+          budget
         );
         return toInference(item, retryParsed);
       }
 
       return inference;
     } catch (error) {
+      // 時間上限による打ち切りは再試行せず、そのまま呼び出し元（processItems）へ返す。
+      if (error instanceof TimeBudgetExhaustedError) throw error;
       lastError = error as Error;
     }
   }
@@ -427,32 +448,87 @@ async function upsertArticle(item: FeedItem, inference: AIInference) {
   }
 }
 
+// Ctrl+C などで中断されたとき、crawl_runs に失敗として記録するための印。
+class CrawlInterruptedError extends Error {}
+
 async function main() {
-  await ensureOllamaIsRunning();
+  // 時間上限は、実行を開始した時刻から数える。
+  const startedAtMs = Date.now();
+  const store = createSupabaseRunStore(supabase);
 
-  console.log(`RSS取得中: ${RSS_FEEDS.map((f) => f.name).join(", ")}`);
-  const rawItems = await fetchLatestArticles();
-  console.log(`${rawItems.length}件の記事を取得しました。`);
-
-  console.log("本文抽出中(Python/trafilatura)...");
-  await enrichExcerptsWithFullText(rawItems);
-
-  console.log("重複記事を判定中(Python/rapidfuzz)...");
-  const items = await removeDuplicateArticles(rawItems);
-  if (items.length < rawItems.length) {
-    console.log(`重複記事を${rawItems.length - items.length}件除外しました（${items.length}件を処理します）。`);
+  const started = await startRun(store, "crawl", { fallback: fallbackLog });
+  if (started.kind === "skipped") {
+    console.log("別の収集が実行中のため、今回はスキップします。");
+    return;
+  }
+  if (started.kind === "unavailable") {
+    // DB に記録できない（接続不可・crawl_runs 未作成など）。保存もできないため、早めに終了する。
+    throw new Error(`crawl_runs に実行を記録できないため中止します（記録: ${getStateDir()}\crawl-fallback.log）`);
   }
 
-  for (const [index, item] of items.entries()) {
-    console.log(`[${index + 1}/${items.length}] 推論中(Ollama/${OLLAMA_MODEL}): ${item.title}`);
+  // 進捗の件数。中断（Ctrl+C）時にも、ここまでの分を記録できるようにする。
+  const counts = { fetched: 0, saved: 0, failed: 0, truncated: false };
+  let fatalError: unknown;
+  let finished = false;
 
-    try {
-      const inference = await inferArticleDetails(item);
-      await upsertArticle(item, inference);
-      console.log(`  -> 保存完了 (priority=${inference.priority_label}, importance=${inference.importance})`);
-    } catch (error) {
-      console.warn(`  -> 推論または保存に失敗したためスキップします: ${(error as Error).message}`);
+  const finalize = async () => {
+    if (finished) return;
+    finished = true;
+    const outcome = buildOutcome({ ...counts, ...(fatalError !== undefined ? { fatalError } : {}) });
+    await finishRun(store, started.runId, outcome, { fallback: fallbackLog });
+    if (outcome.status === "failed") process.exitCode = 1;
+  };
+  const onInterrupt = () => {
+    fatalError = new CrawlInterruptedError("interrupted");
+    void finalize().finally(() => process.exit(130));
+  };
+  process.once("SIGINT", onInterrupt);
+
+  try {
+    await ensureOllamaIsRunning();
+
+    console.log(`RSS取得中: ${RSS_FEEDS.map((f) => f.name).join(", ")}`);
+    const rawItems = await fetchLatestArticles();
+    counts.fetched = rawItems.length;
+    console.log(`${rawItems.length}件の記事を取得しました。`);
+
+    console.log("本文抽出中(Python/trafilatura)...");
+    await enrichExcerptsWithFullText(rawItems);
+
+    console.log("重複記事を判定中(Python/rapidfuzz)...");
+    const items = await removeDuplicateArticles(rawItems);
+    if (items.length < rawItems.length) {
+      console.log(`重複記事を${rawItems.length - items.length}件除外しました（${items.length}件を処理します）。`);
     }
+
+    // 全体の時間上限（1時間50分）を超えそうなら、残りの記事を打ち切って保存済み分を記録する。
+    const result = await processItems(
+      items,
+      async (item, index, budget) => {
+        console.log(`[${index + 1}/${items.length}] 推論中(Ollama/${OLLAMA_MODEL}): ${item.title}`);
+        const inference = await inferArticleDetails(item, budget);
+        await upsertArticle(item, inference);
+        counts.saved++;
+        console.log(`  -> 保存完了 (priority=${inference.priority_label}, importance=${inference.importance})`);
+      },
+      {
+        startedAt: startedAtMs,
+        onError: (_item, _index, error) => {
+          counts.failed++;
+          console.warn(`  -> 推論または保存に失敗したためスキップします: ${(error as Error).message}`);
+        },
+      }
+    );
+    counts.truncated = result.truncated;
+    if (result.truncated) {
+      console.warn(`時間上限で打ち切りました（未処理 ${result.unprocessed} 件。次回の実行で再挑戦されます）。`);
+    }
+  } catch (error) {
+    fatalError = error;
+    throw error;
+  } finally {
+    process.removeListener("SIGINT", onInterrupt);
+    await finalize();
   }
 
   console.log("クローラー処理が完了しました。");

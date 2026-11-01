@@ -34,6 +34,26 @@ describe("processItems", () => {
     expect(result).toEqual({ saved: 2, failed: 1, unprocessed: 0, truncated: false });
   });
 
+  it("失敗した記事だけ onError が呼ばれる（未処理の打ち切りでは呼ばれない）", async () => {
+    const clock = makeClock();
+    const errors: string[] = [];
+    await processItems(
+      ["a", "b"],
+      async (item, _i, budget) => {
+        if (item === "a") throw new Error("boom");
+        clock.advance(10 * MINUTE);
+        budget.timeoutMs(5 * MINUTE); // 残りなし → 未処理として打ち切り
+      },
+      {
+        startedAt: 0,
+        now: clock.now,
+        maxRunMs: 10 * MINUTE,
+        onError: (item) => void errors.push(String(item)),
+      }
+    );
+    expect(errors).toEqual(["a"]);
+  });
+
   it("上限に達したら残りを処理せず truncated=true（保存済み分は残る）", async () => {
     const clock = makeClock();
     const handled: string[] = [];

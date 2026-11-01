@@ -15,6 +15,8 @@ export interface TimeBudget {
 
 export interface ProcessItemsOptions {
   startedAt: number;
+  // 記事の処理に失敗したとき（失敗として数える場合のみ）に呼ばれる。ログ出力用。
+  onError?: (item: unknown, index: number, error: unknown) => void;
   now?: () => number;
   maxRunMs?: number;
   minRemainingMs?: number;
@@ -63,6 +65,7 @@ export async function processItems<T>(
         return { saved, failed, unprocessed: items.length - index, truncated: true };
       }
       failed++;
+      options.onError?.(items[index], index, error);
     }
   }
   return { saved, failed, unprocessed: 0, truncated: false };

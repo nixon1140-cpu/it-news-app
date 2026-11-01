@@ -8,6 +8,7 @@
     "start": "next start -p 3001",
     "lint": "eslint",
     "crawl": "npx tsx src/scripts/crawler.ts",
+    "crawl:check": "npx tsx src/scripts/crawl-check.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:rls": "vitest run --config vitest.rls.config.ts"
