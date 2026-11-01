@@ -34,9 +34,9 @@ Next.js 16.2.9（App Router）, React 19, TypeScript, Tailwind CSS 4, shadcn/ui,
 * `published_at` (TIMESTAMPTZ): RSS の公開日時
 * 索引: `(importance desc, published_at desc)`
 * 制約: `url` の UNIQUE（`supabase/schema.sql` に統合済み。`migrations/002_add_url_unique_constraint.sql` は既存DB向けの履歴として残す。クローラーの upsert の基準）
-* **RLS（行レベルセキュリティ）:** 有効。ポリシーは `Public read access`（SELECT のみ、対象は anon と authenticated）の1つだけ。INSERT / UPDATE / DELETE はポリシーを作らないことで anon・authenticated から拒否し、service_role（RLS を迂回する）だけが書き込める。
+* **RLS（行レベルセキュリティ）:** 有効。ポリシーは `Public read access`（SELECT のみ、対象は anon と authenticated）の1つだけ。INSERT / UPDATE / DELETE はポリシーを作らないことで anon・authenticated から拒否し、service_role（RLS を迂回する）だけが書き込める。書き込みは GRANT（表の権限。anon / authenticated は SELECT のみ）と RLS の2段で防ぐ。テストは結果（行が変わらないこと）で判定する。
 * **RLS のテスト:** テスト専用の別プロジェクトで実行。`.env.test` に `TEST_SUPABASE_URL` / `TEST_SUPABASE_ANON_KEY` / `TEST_SUPABASE_SERVICE_ROLE_KEY` を置く（コミットしない）。
-  * anon: SELECT 成功 / INSERT は 42501 エラー / UPDATE・DELETE は RLS で拒否されてもエラーにならず0件扱いのため、service_role で再取得し行が不変であることを確認。
+  * anon: SELECT 成功（テスト行が読める）/ INSERT・UPDATE・DELETE は「42501 エラー」または「エラーなしで0件」のどちらでも合格（それ以外のエラーは不合格）。どの場合も service_role で再取得し、INSERT は試した url の行が無いこと、UPDATE・DELETE は対象行が元のままであることを確認。
   * service_role でテスト行を投入し、終了時に削除（url に `test-` 接頭辞）。
   * テスト用DBへのスキーマ適用元は `schema.sql` に一本化済み（何度実行しても壊れない書き方）。テスト用DBへの適用は手動。
 

@@ -37,6 +37,13 @@ create index if not exists articles_priority_sort_idx
 
 alter table public.articles enable row level security;
 
+-- 書き込みは「GRANT（表の権限）」と「RLS」の2段で防ぐ。
+-- Supabase の設定によっては表の権限が自動では付かないため、明示する（何度実行しても同じ結果になる）。
+-- anon / authenticated は SELECT のみ、service_role だけが全操作できる。
+revoke all on public.articles from anon, authenticated;
+grant select on public.articles to anon, authenticated;
+grant all on public.articles to service_role;
+
 -- 一覧・詳細表示はクライアント（anon key）からの読み取りのみ許可。
 -- create policy には if not exists が無いため、先に削除してから作り直す（再実行対策）。
 drop policy if exists "Public read access" on public.articles;

@@ -69,33 +69,41 @@ describe.skipIf(envResult.status !== "ready")("articles の RLS", () => {
     expect(data).toEqual([{ url: seedUrl }]);
   });
 
-  it("anon の INSERT は 42501 で拒否される", async () => {
+  // 書き込みは GRANT（表の権限）と RLS の2段で防ぐ。どちらで止まるかで結果が変わるため、
+  // 「42501 エラー」または「エラーなしで0件」のどちらも合格とし、それ以外のエラーは不合格にする。
+  // 最終的な判定は、service_role で読み直した結果（行が変わっていないこと）で行う。
+  function expectDeniedOrNoop(result: { data: unknown[] | null; error: { code?: string } | null }) {
+    if (result.error) {
+      expect(result.error.code).toBe("42501");
+    } else {
+      expect(result.data ?? []).toEqual([]);
+    }
+  }
+
+  it("anon の INSERT は拒否され、行が作られない", async () => {
     const url = urlOf("anon-insert");
-    const { error } = await anon.from("articles").insert(makeArticle(url));
-    expect(error?.code).toBe("42501");
+    const result = await anon.from("articles").insert(makeArticle(url)).select();
+    expectDeniedOrNoop(result);
+
     expect(await fetchByUrl(url)).toHaveLength(0);
   });
 
-  it("anon の UPDATE はエラーにならず0件扱いで、行は変わらない", async () => {
-    const { data, error } = await anon
-      .from("articles")
-      .update({ title: "hacked" })
-      .eq("url", seedUrl)
-      .select();
-    expect(error).toBeNull();
-    expect(data).toEqual([]);
+  it("anon の UPDATE は拒否または0件扱いで、行は元のまま", async () => {
+    const result = await anon.from("articles").update({ title: "hacked" }).eq("url", seedUrl).select();
+    expectDeniedOrNoop(result);
 
     const rows = await fetchByUrl(seedUrl);
     expect(rows).toHaveLength(1);
     expect(rows[0].title).toBe("RLS test article");
   });
 
-  it("anon の DELETE はエラーにならず0件扱いで、行は消えない", async () => {
-    const { data, error } = await anon.from("articles").delete().eq("url", seedUrl).select();
-    expect(error).toBeNull();
-    expect(data).toEqual([]);
+  it("anon の DELETE は拒否または0件扱いで、行は消えない", async () => {
+    const result = await anon.from("articles").delete().eq("url", seedUrl).select();
+    expectDeniedOrNoop(result);
 
-    expect(await fetchByUrl(seedUrl)).toHaveLength(1);
+    const rows = await fetchByUrl(seedUrl);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].title).toBe("RLS test article");
   });
 
   it("service_role は INSERT / UPDATE / DELETE できる", async () => {
