@@ -1,6 +1,6 @@
 # ITニュース行動提案アプリ - 仕様書・設計書
 
-最終更新: 2026-11-01（D1テスト実装済み・G2/G4/G5検討案を追記）。実装と食い違う場合はコードを正とする。
+最終更新: 2026-11-01（D1テスト実装済み・G0決定事項を追記）。実装と食い違う場合はコードを正とする。
 
 ## 1. 目的と守るべき方針
 * **目的:** 単なるニュースリーダーではなく「今日何をすべきかが分かる」意思決定ツール。
@@ -79,17 +79,22 @@ Next.js 16.2.9（App Router）, React 19, TypeScript, Tailwind CSS 4, shadcn/ui,
 | RLS テスト（`npm run test:rls`） | 実装済み（`.env.test` が揃っているときだけ実行） |
 | ユニットテスト（Vitest / pytest） | 実装済み |
 
-G1〜G4 は progress.md の「G0 の要判断12件」への回答後に着手する。想定順序: D1 → G4 → G1 → G2 → G5（G2 は G4 の定期実行、G5 は G2 の話題度に依存）。
+G0 の要判断12件は回答済み（5.1）。想定順序: D1 → G4 → G1 → G2 → G5（G2 は G4 の定期実行、G5 は G2 の話題度に依存）。
 
-## 5. 検討中の案（未決定・本文の仕様ではない）
-* `priority_label` と `importance` の重複：どちらも AI の出力から作られ、表示・並びに効くのは `priority_label` のみ（`importance` は `/api/trends` の抽出順と索引で使用）。案：片方を廃止、または `importance` を `priority_label` から導出する。
-* `source`（出どころ名）、話題度、手動投入を示す列の追加（G1〜G3 と連動）。
+## 5. 設計判断
+### 5.1 G0 決定事項（2026-11-01）
+* **G1 出どころ名:** `articles` に `source` 列（文字列）を追加。既存記事は URL のドメインから推定して1回だけ一括更新。収集元は6本のまま（設定ファイル化は次に検討）。
+* **G2 話題度:** はてなブックマーク数（無料・キー不要）の7日間の増加量。毎日 `article_metrics`（`article_id`, `measured_at`, `hatena_count`）に1行保存し、30日より古い行は収集のついでに削除。計測が抜けた日は直近2回の差で計算。並び順は `priority_label` の中で話題度の高い順（`importance` は残す）。
+* **G3 手動投入:** コマンド（`npm run add -- <URL>`）で投入し、画面からは入れない（service_role キーをブラウザに出さない）。`source` は `manual`。既存URLならスキップして「登録済み」と表示。
+* **G4 定期実行:** Windows タスクスケジューラで1日1回（時刻を逃したら起動後に1回実行）。`start-app.bat` は直近12時間以内に収集済みならスキップ。Ollama 不在などの失敗は記録して次回に回す。実行履歴は `crawl_runs` テーブル（処理種別〔収集/話題度計測/週次まとめ〕、開始・終了時刻、成功・失敗件数、エラー概要）に保存し、anon・authenticated には読み取り権限も与えない（確認は Supabase 管理画面）。
+* **G5 週次まとめ:** G2 完了後に着手。話題度上位5本を「事実」（`summary`）と「示唆」（`action_individual` / `action_enterprise`）に分けて構成し、LLM は総括のみ生成。保存先 `weekly_digests`（`week_start`, `content` JSON, `created_at`）、RLS は読み取りのみ公開。出力 JSON は `extractJson` で取り出す。`trend_diff` は今のまま。
+* 参考: MameTech News（technews.mametaro.dev）。Grok Bot・Cursor SDK・GitHub Actions（ローカルの Ollama に届かない）は採用しない。
+
+### 5.2 検討中の案（未決定）
+* `priority_label` と `importance` の重複：案：片方を廃止、または `importance` を `priority_label` から導出する（`/api/trends` が `importance` を使うため保留）。
 * `trend_diff` を過去記事との比較に基づく内容にする。
-* クローラーの実行履歴を DB またはログファイルに残す。案：`crawl_runs` テーブル（処理種別〔収集/話題度計測/週次まとめ〕、開始・終了時刻、成功・失敗件数、エラー概要）。
-* **G2 話題度:** X の代わりに、はてなブックマーク数（無料・キー不要）を使う。累計値のため毎日スナップショットを `article_metrics`（`article_id`, `measured_at`, `hatena_count`）に保存し、7日間の増加量を話題度とする。計測が抜けた日は直近2回の差で計算。
-* **G4 定期実行:** GitHub Actions はローカルの Ollama に届かないため、Windows タスクスケジューラ または `start-app.bat` の延長で行う。
-* **G5 週次まとめ:** 話題度上位5本（G2 前は `priority_label` 上位で代替）を「事実」（`summary`）と「示唆」（`action_individual` / `action_enterprise`）に分けて構成し、LLM は総括のみ生成。保存先 `weekly_digests`（`week_start`, `content` JSON, `created_at`）、RLS は読み取りのみ公開。出力 JSON は `extractJson` で取り出す。
-* 参考: MameTech News（technews.mametaro.dev）。Grok Bot・Cursor SDK は課金が発生するため採用しない。
+* 収集元の設定ファイル化。
+* `schema.sql` の GRANT を本番DBへ適用するか。
 
 ## 6. エージェント構成の検討
 * **結論:** サブエージェント、AIチーム／マルチエージェントは使わない（2026-11時点）。
